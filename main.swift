@@ -253,8 +253,8 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
         let mainStack = NSStackView()
         mainStack.orientation = .vertical
-        mainStack.alignment = .leading
-        mainStack.spacing = 14
+        mainStack.alignment = .centerX
+        mainStack.spacing = 12
         mainStack.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(mainStack)
 
@@ -265,20 +265,27 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
             mainStack.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -22)
         ])
 
-        // 1. Header
+        // 1. Header (Centered)
         let header = NSTextField(labelWithString: "Configure Mouse Button")
-        header.font = NSFont.boldSystemFont(ofSize: 14)
+        header.font = NSFont.boldSystemFont(ofSize: 15)
+        header.alignment = .center
         mainStack.addArrangedSubview(header)
+        header.leadingAnchor.constraint(equalTo: mainStack.leadingAnchor).isActive = true
+        header.trailingAnchor.constraint(equalTo: mainStack.trailingAnchor).isActive = true
 
-        let desc = NSTextField(labelWithString: "Click \"Record Button\" below, then press your other mouse button.")
+        let desc = NSTextField(labelWithString: "Click Record below, then press your mouse button to bind it.")
         desc.textColor = .secondaryLabelColor
-        desc.font = NSFont.systemFont(ofSize: 11)
+        desc.font = NSFont.systemFont(ofSize: 12)
+        desc.alignment = .center
         mainStack.addArrangedSubview(desc)
+        desc.leadingAnchor.constraint(equalTo: mainStack.leadingAnchor).isActive = true
+        desc.trailingAnchor.constraint(equalTo: mainStack.trailingAnchor).isActive = true
 
-        // Permission warning row (hidden when trusted)
+        // Permission warning row (hidden when trusted, Centered)
         let permRow = NSStackView()
         permRow.orientation = .horizontal
         permRow.spacing = 8
+        permRow.alignment = .centerY
 
         permissionWarningLabel = NSTextField(labelWithString: "⚠️ Accessibility required:")
         permissionWarningLabel.textColor = .systemRed
@@ -295,10 +302,11 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
         mainStack.addArrangedSubview(permRow)
 
-        // 2. Recording row
+        // 2. Recording row (Centered)
         let recordRow = NSStackView()
         recordRow.orientation = .horizontal
         recordRow.spacing = 10
+        recordRow.alignment = .centerY
 
         recordButton = NSButton(title: "🎙️ Record Mouse Button", target: self, action: #selector(startRecording))
         recordButton.bezelStyle = .rounded
@@ -310,17 +318,22 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
         cancelButton.isHidden = true
         recordRow.addArrangedSubview(cancelButton)
 
+        mainStack.addArrangedSubview(recordRow)
+
+        // Status Label (Centered underneath Record button)
         statusLabel = NSTextField(labelWithString: "Ready")
         statusLabel.font = NSFont.systemFont(ofSize: 12)
         statusLabel.textColor = .secondaryLabelColor
-        recordRow.addArrangedSubview(statusLabel)
+        statusLabel.alignment = .center
+        mainStack.addArrangedSubview(statusLabel)
+        statusLabel.leadingAnchor.constraint(equalTo: mainStack.leadingAnchor).isActive = true
+        statusLabel.trailingAnchor.constraint(equalTo: mainStack.trailingAnchor).isActive = true
 
-        mainStack.addArrangedSubview(recordRow)
-
-        // 3. Action selection row
+        // 3. Action selection row (Centered)
         let actionRow = NSStackView()
         actionRow.orientation = .horizontal
         actionRow.spacing = 10
+        actionRow.alignment = .centerY
 
         let mapToLabel = NSTextField(labelWithString: "Map to:")
         mapToLabel.font = NSFont.systemFont(ofSize: 12)
@@ -346,15 +359,18 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
         separator.leadingAnchor.constraint(equalTo: mainStack.leadingAnchor).isActive = true
         separator.trailingAnchor.constraint(equalTo: mainStack.trailingAnchor).isActive = true
 
-        // 4. Current Mappings Header
+        // 4. Current Mappings Header (Centered)
         let currentHeader = NSTextField(labelWithString: "Active Mappings:")
-        currentHeader.font = NSFont.boldSystemFont(ofSize: 12)
+        currentHeader.font = NSFont.boldSystemFont(ofSize: 13)
+        currentHeader.alignment = .center
         mainStack.addArrangedSubview(currentHeader)
+        currentHeader.leadingAnchor.constraint(equalTo: mainStack.leadingAnchor).isActive = true
+        currentHeader.trailingAnchor.constraint(equalTo: mainStack.trailingAnchor).isActive = true
 
         // Mappings container
         mappingsStackView = NSStackView()
         mappingsStackView.orientation = .vertical
-        mappingsStackView.alignment = .leading
+        mappingsStackView.alignment = .centerX
         mappingsStackView.spacing = 8
         mappingsStackView.translatesAutoresizingMaskIntoConstraints = false
         mainStack.addArrangedSubview(mappingsStackView)
@@ -543,10 +559,13 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
         mappingsStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
 
         if ConfigManager.shared.mappings.isEmpty {
-            let emptyLabel = NSTextField(labelWithString: "No mappings configured.")
+            let emptyLabel = NSTextField(labelWithString: "No mappings configured yet.")
             emptyLabel.textColor = .secondaryLabelColor
-            emptyLabel.font = NSFont.systemFont(ofSize: 11)
+            emptyLabel.font = NSFont.systemFont(ofSize: 12)
+            emptyLabel.alignment = .center
             mappingsStackView.addArrangedSubview(emptyLabel)
+            emptyLabel.leadingAnchor.constraint(equalTo: mappingsStackView.leadingAnchor).isActive = true
+            emptyLabel.trailingAnchor.constraint(equalTo: mappingsStackView.trailingAnchor).isActive = true
             return
         }
 
