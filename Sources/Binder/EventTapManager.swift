@@ -80,7 +80,7 @@ public final class EventTapManager {
             callback: tapCallback,
             userInfo: nil
         ) else {
-            NSLog("[mousebutton] Failed to create CGEventTap.")
+            NSLog("[Binder] Failed to create CGEventTap.")
             return
         }
 
