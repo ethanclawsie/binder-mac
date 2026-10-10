@@ -38,12 +38,6 @@ struct BinderApp: App {
                 }
             }
 
-            Divider()
-
-            Toggle("Launch at Login", isOn: Binding(
-                get: { LaunchAtLogin.isEnabled },
-                set: { LaunchAtLogin.set($0) }
-            ))
 
             Divider()
 
