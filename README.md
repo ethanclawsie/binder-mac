@@ -1,6 +1,6 @@
-# mousebutton 🖱️⚡
+# mousebutton 🖱️⌨️⚡
 
-An ultra-minimal, high-performance macOS menu bar utility to map any mouse button to any keyboard shortcut (e.g. `Cmd + \`` to cycle app windows).
+An ultra-minimal, high-performance macOS menu bar utility to map any mouse button or keyboard key to any keyboard shortcut (e.g. `Button 4` ➔ `Cmd + \`` to cycle app windows, `F1` ➔ `Cmd + Space`).
 
 ---
 
@@ -9,17 +9,18 @@ An ultra-minimal, high-performance macOS menu bar utility to map any mouse butto
 * **Modern SwiftUI Architecture:** Built with native SwiftUI, Swift Package Manager, and `@Observable`, mirroring modern macOS utilities like `copyshelf-mac`.
 * **Menu Bar GUI:** Sits cleanly in your macOS menu bar with a native mouse icon (`computermouse.fill`) and zero Dock icon clutter (`LSUIElement = true`).
 * **High Performance & Zero Bloat:**
-  * Entire app bundle is **~450 KB**.
-  * Consumes **~8–12 MB** of RAM (compared to 50–150 MB for multi-feature utilities).
-  * **0.0% CPU** idle. Subscribes strictly to auxiliary mouse clicks via `.cgSessionEventTap`, completely ignoring mouse movement, regular left/right clicks, and scrolling.
-* **Fully Customizable Shortcuts:**
-  * **＋ New Mapping:** Click to create a custom mapping entry.
-  * **Record Mouse Button:** Press any mouse button (Side Button 3, Button 4, Button 5, Middle click, etc.).
-  * **Record Shortcut:** Press any keyboard combination (e.g. `⌘ \``, `⌘ ⇧ \``, or any custom key combo with modifiers).
-  * **Save Mapping:** Saves and applies the mapping immediately.
-  * **Redo Mouse / Redo Keys:** Dedicated buttons to redo the mouse button click or keyboard shortcut individually.
+  * Entire app bundle is **~350 KB**.
+  * Consumes **~14 MB** physical RAM (compared to 100–200 MB for bloated utilities).
+  * **0.0% CPU** idle. Zero allocations on hot-path keystroke simulation.
+  * **Dynamic Event Tap:** Keyboard events are only tapped if keyboard mappings exist—zero overhead on normal typing.
+  * **Loop Prevention:** Synthetic events are tagged to prevent recursive shortcut trigger loops.
+* **Dual-Trigger Customizable Shortcuts:**
+  * **＋ New Mapping:** Choose **Mouse Button** or **Keyboard Key** as the trigger.
+  * **Record Trigger:** Click any mouse button (Middle Button, Button 4, Button 5) or press any key / hotkey combo.
+  * **Record Target Shortcut:** Press any action keyboard combination (e.g. `⌘ \``, `⌘ Space`, or any custom combo).
+  * **Save Mapping:** Saves and applies immediately.
+  * **In-Place Redo Trigger / Redo Action:** Dedicated buttons to redo either side of any mapping.
   * **Remove:** Delete any mapping entry with one click.
-  * Original mouse clicks are swallowed so browsers don't navigate back/forward in web history when you press the button.
 * **Native & Safe:**
   * Modern `SMAppService` for Launch at Login.
   * Single-instance enforcement.
