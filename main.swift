@@ -232,7 +232,7 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 480, height: 420),
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 420),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -255,15 +255,14 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
         mainStack.orientation = .vertical
         mainStack.alignment = .leading
         mainStack.spacing = 14
-        mainStack.edgeInsets = NSEdgeInsets(top: 20, left: 24, bottom: 20, right: 24)
         mainStack.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(mainStack)
 
         NSLayoutConstraint.activate([
-            mainStack.topAnchor.constraint(equalTo: contentView.topAnchor),
-            mainStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            mainStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            mainStack.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor)
+            mainStack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 22),
+            mainStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
+            mainStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
+            mainStack.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -22)
         ])
 
         // 1. Header
@@ -342,8 +341,10 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
         // Separator
         let separator = NSBox()
         separator.boxType = .separator
+        separator.translatesAutoresizingMaskIntoConstraints = false
         mainStack.addArrangedSubview(separator)
-        separator.widthAnchor.constraint(equalTo: mainStack.widthAnchor, constant: -48).isActive = true
+        separator.leadingAnchor.constraint(equalTo: mainStack.leadingAnchor).isActive = true
+        separator.trailingAnchor.constraint(equalTo: mainStack.trailingAnchor).isActive = true
 
         // 4. Current Mappings Header
         let currentHeader = NSTextField(labelWithString: "Active Mappings:")
@@ -354,8 +355,11 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
         mappingsStackView = NSStackView()
         mappingsStackView.orientation = .vertical
         mappingsStackView.alignment = .leading
-        mappingsStackView.spacing = 6
+        mappingsStackView.spacing = 8
+        mappingsStackView.translatesAutoresizingMaskIntoConstraints = false
         mainStack.addArrangedSubview(mappingsStackView)
+        mappingsStackView.leadingAnchor.constraint(equalTo: mainStack.leadingAnchor).isActive = true
+        mappingsStackView.trailingAnchor.constraint(equalTo: mainStack.trailingAnchor).isActive = true
     }
 
     func updatePermissionStatus() {
@@ -550,11 +554,17 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
             let row = NSStackView()
             row.orientation = .horizontal
             row.spacing = 10
+            row.alignment = .centerY
+            row.translatesAutoresizingMaskIntoConstraints = false
 
             let name = (button == 2) ? "Middle Button (Button 2)" : "Button \(button)"
             let label = NSTextField(labelWithString: "• \(name): \(action.description)")
             label.font = NSFont.systemFont(ofSize: 12)
             row.addArrangedSubview(label)
+
+            let spacer = NSView()
+            spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            row.addArrangedSubview(spacer)
 
             let deleteBtn = NSButton(title: "Remove", target: self, action: #selector(deleteMappingClicked(_:)))
             deleteBtn.bezelStyle = .inline
@@ -562,6 +572,8 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
             row.addArrangedSubview(deleteBtn)
 
             mappingsStackView.addArrangedSubview(row)
+            row.leadingAnchor.constraint(equalTo: mappingsStackView.leadingAnchor).isActive = true
+            row.trailingAnchor.constraint(equalTo: mappingsStackView.trailingAnchor).isActive = true
         }
     }
 
