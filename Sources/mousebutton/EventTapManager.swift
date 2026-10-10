@@ -18,7 +18,6 @@ public final class EventTapManager {
 
     public init() {
         checkPermission()
-        updateTap()
     }
 
     public func checkPermission() {
@@ -54,16 +53,22 @@ public final class EventTapManager {
 
     public func updateTap() {
         checkPermission()
-        if tap == nil && isTrusted {
-            installTap()
-        } else if !isTrusted && tap != nil {
+        if tap != nil {
             removeTap()
+        }
+        if isTrusted {
+            installTap()
         }
     }
 
     private func installTap() {
-        let mask = (1 << CGEventType.otherMouseDown.rawValue) |
+        var mask = (1 << CGEventType.otherMouseDown.rawValue) |
                    (1 << CGEventType.otherMouseUp.rawValue)
+
+        if MappingStore.shared.hasKeyMappings {
+            mask |= (1 << CGEventType.keyDown.rawValue) |
+                    (1 << CGEventType.keyUp.rawValue)
+        }
 
         activeTapManager = self
 
@@ -72,7 +77,7 @@ public final class EventTapManager {
             place: .headInsertEventTap,
             options: .defaultTap,
             eventsOfInterest: CGEventMask(mask),
-            callback: mouseTapCallback,
+            callback: tapCallback,
             userInfo: nil
         ) else {
             NSLog("[mousebutton] Failed to create CGEventTap.")
@@ -100,7 +105,7 @@ public final class EventTapManager {
         self.isListening = false
     }
 
-    fileprivate func handle(_ type: CGEventType, buttonNumber: Int64) -> Bool {
+    fileprivate func handle(type: CGEventType, buttonNumber: Int64, keyCode: UInt16, flags: UInt64) -> Bool {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let tap = tap {
                 CGEvent.tapEnable(tap: tap, enable: true)
@@ -108,57 +113,88 @@ public final class EventTapManager {
             return false
         }
 
-        // Recording mode: capture next mouse button
-        if isRecordingMouse {
-            if type == .otherMouseDown {
-                recordedButtonForMouseUp = buttonNumber
-                isRecordingMouse = false
-                let callback = recordingCallback
-                recordingCallback = nil
-                callback?(buttonNumber)
+        // 1. Mouse Button events
+        if type == .otherMouseDown || type == .otherMouseUp {
+            if isRecordingMouse {
+                if type == .otherMouseDown {
+                    recordedButtonForMouseUp = buttonNumber
+                    isRecordingMouse = false
+                    let callback = recordingCallback
+                    recordingCallback = nil
+                    callback?(buttonNumber)
+                    return true
+                }
+                return false
+            }
+
+            if let recorded = recordedButtonForMouseUp, buttonNumber == recorded {
+                if type == .otherMouseUp {
+                    recordedButtonForMouseUp = nil
+                }
                 return true
             }
-            return false
-        }
 
-        // Consume mouse-up of recently recorded button
-        if let recorded = recordedButtonForMouseUp, buttonNumber == recorded {
-            if type == .otherMouseUp {
-                recordedButtonForMouseUp = nil
+            guard MappingStore.shared.isEnabled else {
+                return false
             }
+
+            guard let mapping = MappingStore.shared.mouseLookup[buttonNumber] else {
+                return false
+            }
+
+            if type == .otherMouseDown {
+                sendKeystroke(
+                    virtualKey: CGKeyCode(mapping.targetKeyCode),
+                    flags: CGEventFlags(rawValue: mapping.targetModifierFlags)
+                )
+            }
+
             return true
         }
 
-        guard MappingStore.shared.isEnabled else {
-            return false
+        // 2. Keyboard Key events
+        if type == .keyDown || type == .keyUp {
+            guard MappingStore.shared.isEnabled else {
+                return false
+            }
+
+            let hash = keyLookupHash(keyCode: keyCode, modifierFlags: flags)
+            guard let mapping = MappingStore.shared.keyLookup[hash] else {
+                return false
+            }
+
+            if type == .keyDown {
+                sendKeystroke(
+                    virtualKey: CGKeyCode(mapping.targetKeyCode),
+                    flags: CGEventFlags(rawValue: mapping.targetModifierFlags)
+                )
+            }
+
+            return true
         }
 
-        guard let mapping = MappingStore.shared.lookup[buttonNumber] else {
-            return false
-        }
-
-        if type == .otherMouseDown {
-            sendKeystroke(
-                virtualKey: CGKeyCode(mapping.keyCode),
-                flags: CGEventFlags(rawValue: mapping.modifierFlags)
-            )
-        }
-
-        return true
+        return false
     }
 }
 
 private nonisolated(unsafe) weak var activeTapManager: EventTapManager?
 
-private func mouseTapCallback(
+private func tapCallback(
     proxy: CGEventTapProxy,
     type: CGEventType,
     event: CGEvent,
     refcon: UnsafeMutableRawPointer?
 ) -> Unmanaged<CGEvent>? {
+    if event.getIntegerValueField(.eventSourceUserData) == kSyntheticUserTag {
+        return Unmanaged.passUnretained(event)
+    }
+
     let buttonNumber = event.getIntegerValueField(.mouseEventButtonNumber)
+    let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
+    let flags = event.flags.rawValue
+
     let swallow = MainActor.assumeIsolated {
-        activeTapManager?.handle(type, buttonNumber: buttonNumber) ?? false
+        activeTapManager?.handle(type: type, buttonNumber: buttonNumber, keyCode: keyCode, flags: flags) ?? false
     }
     return swallow ? nil : Unmanaged.passUnretained(event)
 }

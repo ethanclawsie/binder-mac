@@ -1,5 +1,7 @@
 import CoreGraphics
 
+public let kSyntheticUserTag: Int64 = 0x53594E54 // "SYNT"
+
 @MainActor
 private let hidEventSource = CGEventSource(stateID: .hidSystemState)
 
@@ -11,6 +13,8 @@ func sendKeystroke(virtualKey: CGKeyCode, flags: CGEventFlags) {
     }
     keyDown.flags = flags
     keyUp.flags = flags
+    keyDown.setIntegerValueField(.eventSourceUserData, value: kSyntheticUserTag)
+    keyUp.setIntegerValueField(.eventSourceUserData, value: kSyntheticUserTag)
     keyDown.post(tap: .cghidEventTap)
     keyUp.post(tap: .cghidEventTap)
 }

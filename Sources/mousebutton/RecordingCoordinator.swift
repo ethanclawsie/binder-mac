@@ -4,10 +4,11 @@ import Observation
 
 public enum RecordingTarget: Equatable {
     case none
-    case newMouseButton
-    case newShortcut
-    case redoMouseButton(mappingID: String)
-    case redoShortcut(mappingID: String)
+    case newMouseTrigger
+    case newKeyTrigger
+    case newActionShortcut
+    case redoTrigger(mappingID: String, isMouse: Bool)
+    case redoAction(mappingID: String)
 }
 
 @MainActor

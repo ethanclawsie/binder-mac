@@ -15,21 +15,38 @@ public final class MappingStore {
         }
     }
 
-    public private(set) var lookup: [Int64: ButtonMapping] = [:]
+    public private(set) var mouseLookup: [Int64: ShortcutMapping] = [:]
+    public private(set) var keyLookup: [UInt64: ShortcutMapping] = [:]
 
-    public var mappings: [ButtonMapping] = [] {
+    public var hasKeyMappings: Bool {
+        !keyLookup.isEmpty
+    }
+
+    private var isInitialized = false
+
+    public var mappings: [ShortcutMapping] = [] {
         didSet {
             rebuildLookup()
             saveMappings()
+            if isInitialized {
+                EventTapManager.shared.updateTap()
+            }
         }
     }
 
     private func rebuildLookup() {
-        var map: [Int64: ButtonMapping] = [:]
+        var mDict: [Int64: ShortcutMapping] = [:]
+        var kDict: [UInt64: ShortcutMapping] = [:]
         for m in mappings {
-            map[m.buttonNumber] = m
+            if m.triggerType == .mouse {
+                mDict[m.triggerButton] = m
+            } else {
+                let hash = keyLookupHash(keyCode: m.triggerKeyCode, modifierFlags: m.triggerModifierFlags)
+                kDict[hash] = m
+            }
         }
-        self.lookup = map
+        self.mouseLookup = mDict
+        self.keyLookup = kDict
     }
 
     public init() {
@@ -41,22 +58,25 @@ public final class MappingStore {
 
         loadMappings()
         rebuildLookup()
+        self.isInitialized = true
     }
 
     private func loadMappings() {
         if let data = UserDefaults.standard.data(forKey: kMappingsKey),
-           let loaded = try? JSONDecoder().decode([ButtonMapping].self, from: data) {
+           let loaded = try? JSONDecoder().decode([ShortcutMapping].self, from: data) {
             self.mappings = loaded
             return
         }
 
         // Default initial mapping: Button 4 -> Cmd + ` (Next window of current app)
         self.mappings = [
-            ButtonMapping(
-                buttonNumber: 4,
-                keyCode: 0x32,
-                modifierFlags: 1 << 20, // CGEventFlags.maskCommand
-                displayString: "⌘ `"
+            ShortcutMapping(
+                triggerType: .mouse,
+                triggerButton: 4,
+                triggerDisplay: "Button 4",
+                targetKeyCode: 0x32,
+                targetModifierFlags: 1 << 20, // CGEventFlags.maskCommand
+                targetDisplay: "⌘ `"
             )
         ]
     }
@@ -67,10 +87,14 @@ public final class MappingStore {
         }
     }
 
-    public func addOrUpdate(_ mapping: ButtonMapping) {
+    public func addOrUpdate(_ mapping: ShortcutMapping) {
         if let index = mappings.firstIndex(where: { $0.id == mapping.id }) {
             mappings[index] = mapping
-        } else if let index = mappings.firstIndex(where: { $0.buttonNumber == mapping.buttonNumber }) {
+        } else if mapping.triggerType == .mouse,
+                  let index = mappings.firstIndex(where: { $0.triggerType == .mouse && $0.triggerButton == mapping.triggerButton }) {
+            mappings[index] = mapping
+        } else if mapping.triggerType == .key,
+                  let index = mappings.firstIndex(where: { $0.triggerType == .key && $0.triggerKeyCode == mapping.triggerKeyCode && $0.triggerModifierFlags == mapping.triggerModifierFlags }) {
             mappings[index] = mapping
         } else {
             mappings.append(mapping)
@@ -81,20 +105,33 @@ public final class MappingStore {
         mappings.removeAll(where: { $0.id == id })
     }
 
-    public func updateButton(id: String, newButton: Int64) {
+    public func updateMouseTrigger(id: String, newButton: Int64) {
         if let index = mappings.firstIndex(where: { $0.id == id }) {
             var updated = mappings[index]
-            updated.buttonNumber = newButton
+            updated.triggerType = .mouse
+            updated.triggerButton = newButton
+            updated.triggerDisplay = mouseButtonDisplayName(for: newButton)
             mappings[index] = updated
         }
     }
 
-    public func updateShortcut(id: String, keyCode: UInt16, modifierFlags: UInt64, displayString: String) {
+    public func updateKeyTrigger(id: String, keyCode: UInt16, modifierFlags: UInt64, display: String) {
         if let index = mappings.firstIndex(where: { $0.id == id }) {
             var updated = mappings[index]
-            updated.keyCode = keyCode
-            updated.modifierFlags = modifierFlags
-            updated.displayString = displayString
+            updated.triggerType = .key
+            updated.triggerKeyCode = keyCode
+            updated.triggerModifierFlags = modifierFlags
+            updated.triggerDisplay = display
+            mappings[index] = updated
+        }
+    }
+
+    public func updateTargetShortcut(id: String, keyCode: UInt16, modifierFlags: UInt64, display: String) {
+        if let index = mappings.firstIndex(where: { $0.id == id }) {
+            var updated = mappings[index]
+            updated.targetKeyCode = keyCode
+            updated.targetModifierFlags = modifierFlags
+            updated.targetDisplay = display
             mappings[index] = updated
         }
     }

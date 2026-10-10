@@ -13,6 +13,10 @@ struct MouseButtonApp: App {
             NSLog("[mousebutton] Another instance is already running (%d instances found). Exiting.", instances.count)
             exit(0)
         }
+
+        _ = MappingStore.shared
+        _ = EventTapManager.shared
+        EventTapManager.shared.updateTap()
     }
 
     var body: some Scene {
@@ -29,8 +33,8 @@ struct MouseButtonApp: App {
             if store.mappings.isEmpty {
                 Text("No buttons mapped")
             } else {
-                ForEach(store.mappings.sorted(by: { $0.buttonNumber < $1.buttonNumber })) { mapping in
-                    Text("\(mouseButtonDisplayName(for: mapping.buttonNumber))  →  \(mapping.displayString)")
+                ForEach(store.mappings) { mapping in
+                    Text("\(mapping.triggerDisplay)  →  \(mapping.targetDisplay)")
                 }
             }
 
