@@ -696,11 +696,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         launchAtLoginMenuItem.state = isLaunchAtLoginEnabled() ? .on : .off
         menu.addItem(launchAtLoginMenuItem)
 
-        // Accessibility settings
-        let accessItem = NSMenuItem(title: "Open Accessibility Settings…", action: #selector(openAccessibilitySettings), keyEquivalent: "")
-        accessItem.target = self
-        menu.addItem(accessItem)
-
         menu.addItem(NSMenuItem.separator())
 
         // Quit
