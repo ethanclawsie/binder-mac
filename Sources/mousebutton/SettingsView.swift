@@ -93,46 +93,11 @@ struct SettingsView: View {
                 }
             }
 
-            // 4. Live Button Tester
-            HStack(spacing: 8) {
-                Image(systemName: "hand.tap.fill")
-                    .foregroundStyle(eventTap.lastDetectedButton == nil ? Color.secondary : Color.blue)
-                    .font(.caption)
-
-                if let btn = eventTap.lastDetectedButton {
-                    Text("Detected: \(mouseButtonDisplayName(for: btn))")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-
-                    if let mapping = store.lookup[btn] {
-                        Text("➔  Triggers \(mapping.displayString)")
-                            .font(.caption)
-                            .foregroundStyle(.green)
-                            .fontWeight(.bold)
-                    } else {
-                        Text("(Unmapped)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } else {
-                    Text("Click any mouse button to test detection")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(Color(nsColor: .controlBackgroundColor).opacity(0.4))
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.15), lineWidth: 1))
-            )
-
             Spacer(minLength: 0)
 
             Divider()
 
-            // 5. Footer controls
+            // 4. Footer controls
             HStack {
                 Toggle("Enabled", isOn: $store.isEnabled)
                     .toggleStyle(.switch)
@@ -151,10 +116,7 @@ struct SettingsView: View {
             .padding(.bottom, 12)
         }
         .padding(.horizontal, 24)
-        .frame(width: 530, height: 500)
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            eventTap.checkPermission()
-        }
+        .frame(width: 530, height: 490)
     }
 
     // MARK: - New Mapping Card Form

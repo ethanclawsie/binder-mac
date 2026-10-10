@@ -10,7 +10,6 @@ public final class EventTapManager {
     public private(set) var isListening: Bool = false
     public private(set) var isRecordingMouse: Bool = false
     public private(set) var isTrusted: Bool = false
-    public var lastDetectedButton: Int64?
 
     @ObservationIgnored private var tap: CFMachPort?
     @ObservationIgnored private var source: CFRunLoopSource?
@@ -18,18 +17,12 @@ public final class EventTapManager {
     @ObservationIgnored private var recordedButtonForMouseUp: Int64?
 
     public init() {
-        self.isTrusted = AXIsProcessTrusted()
+        checkPermission()
         updateTap()
     }
 
     public func checkPermission() {
-        let trusted = AXIsProcessTrusted()
-        if trusted != self.isTrusted {
-            self.isTrusted = trusted
-            if trusted && tap == nil {
-                installTap()
-            }
-        }
+        self.isTrusted = AXIsProcessTrusted()
     }
 
     public static func promptForAccessibility() {
@@ -134,10 +127,6 @@ public final class EventTapManager {
                 recordedButtonForMouseUp = nil
             }
             return true
-        }
-
-        if type == .otherMouseDown {
-            self.lastDetectedButton = buttonNumber
         }
 
         guard MappingStore.shared.isEnabled else {

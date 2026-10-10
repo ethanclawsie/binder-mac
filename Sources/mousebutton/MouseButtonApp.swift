@@ -16,7 +16,7 @@ struct MouseButtonApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra("mousebutton", systemImage: store.isEnabled ? "computermouse.fill" : "computermouse") {
+        MenuBarExtra("mousebutton", systemImage: "computermouse.fill") {
             Toggle("Enabled", isOn: $store.isEnabled)
 
             Button("Configure Keybinds…") {
