@@ -4,30 +4,60 @@ import ApplicationServices
 import ServiceManagement
 
 // MARK: - Constants & Key Codes
-private let kDefaultKeyCode: CGKeyCode = 0x32 // Grave/Tilde `~` (kVK_ANSI_Grave)
-private let kUserDefaultsKey = "savedButtonMappings"
+private let kUserDefaultsKey = "savedCustomButtonMappings_v2"
 
-// MARK: - Action Types
-enum ActionType: String, CaseIterable, Codable {
-    case nextWindow = "Next Window of Same App (⌘ `)"
-    case prevWindow = "Previous Window of Same App (⌘ ⇧ `)"
+// MARK: - Data Model
+struct ButtonMapping: Codable, Identifiable, Equatable {
+    var id: String = UUID().uuidString
+    var buttonNumber: Int64
+    var keyCode: UInt16
+    var modifierFlags: UInt64
+    var displayString: String
+}
 
-    var description: String {
-        return self.rawValue
+// MARK: - Helper to Convert KeyCode to Human Readable String
+func keyString(for keyCode: UInt16, characters: String?) -> String {
+    switch keyCode {
+    case 0x32: return "`"
+    case 0x30: return "Tab"
+    case 0x24: return "Return"
+    case 0x31: return "Space"
+    case 0x33: return "Delete"
+    case 0x35: return "Esc"
+    case 0x7B: return "←"
+    case 0x7C: return "→"
+    case 0x7D: return "↓"
+    case 0x7E: return "↑"
+    case 0x7A: return "F1"
+    case 0x78: return "F2"
+    case 0x63: return "F3"
+    case 0x76: return "F4"
+    case 0x60: return "F5"
+    case 0x61: return "F6"
+    case 0x62: return "F7"
+    case 0x64: return "F8"
+    case 0x65: return "F9"
+    case 0x6D: return "F10"
+    case 0x67: return "F11"
+    case 0x6F: return "F12"
+    default:
+        if let chars = characters?.uppercased(), !chars.isEmpty {
+            return chars
+        }
+        return "Key(\(keyCode))"
     }
 }
 
-// MARK: - Configuration Manager (with Persistence)
+// MARK: - Configuration Manager
 class ConfigManager {
     static let shared = ConfigManager()
 
     var isEnabled: Bool = true
-    var isRecording: Bool = false
+    var isRecordingMouse: Bool = false
     var onButtonRecorded: ((Int64) -> Void)?
     private var isInitialized = false
 
-    // buttonNumber -> ActionType
-    var mappings: [Int64: ActionType] = [:] {
+    var mappings: [ButtonMapping] = [] {
         didSet {
             guard isInitialized else { return }
             saveMappings()
@@ -42,38 +72,42 @@ class ConfigManager {
     }
 
     func loadMappings() {
-        if let data = UserDefaults.standard.dictionary(forKey: kUserDefaultsKey) as? [String: String] {
-            var loaded: [Int64: ActionType] = [:]
-            for (btnStr, actionStr) in data {
-                if let btn = Int64(btnStr), let action = ActionType(rawValue: actionStr) {
-                    loaded[btn] = action
-                }
-            }
-            if !loaded.isEmpty {
-                self.mappings = loaded
-                return
-            }
+        if let data = UserDefaults.standard.data(forKey: kUserDefaultsKey),
+           let loaded = try? JSONDecoder().decode([ButtonMapping].self, from: data) {
+            self.mappings = loaded
+            return
         }
-        // Defaults: Button 4 -> Next Window
+
+        // Default initial mapping: Button 4 -> Cmd + ` (Next window of current app)
         self.mappings = [
-            4: .nextWindow
+            ButtonMapping(
+                buttonNumber: 4,
+                keyCode: 0x32,
+                modifierFlags: CGEventFlags.maskCommand.rawValue,
+                displayString: "⌘ `"
+            )
         ]
     }
 
     func saveMappings() {
-        var dict: [String: String] = [:]
-        for (btn, action) in mappings {
-            dict[String(btn)] = action.rawValue
+        if let data = try? JSONEncoder().encode(mappings) {
+            UserDefaults.standard.set(data, forKey: kUserDefaultsKey)
         }
-        UserDefaults.standard.set(dict, forKey: kUserDefaultsKey)
     }
 
-    func setMapping(button: Int64, action: ActionType) {
-        mappings[button] = action
+    func addOrUpdateMapping(_ mapping: ButtonMapping) {
+        if let index = mappings.firstIndex(where: { $0.id == mapping.id }) {
+            mappings[index] = mapping
+        } else if let index = mappings.firstIndex(where: { $0.buttonNumber == mapping.buttonNumber }) {
+            // Replace mapping for same button
+            mappings[index] = mapping
+        } else {
+            mappings.append(mapping)
+        }
     }
 
-    func removeMapping(button: Int64) {
-        mappings.removeValue(forKey: button)
+    func removeMapping(id: String) {
+        mappings.removeAll(where: { $0.id == id })
     }
 }
 
@@ -93,7 +127,7 @@ func sendKeystroke(virtualKey: CGKeyCode, flags: CGEventFlags) {
     keyUp.post(tap: .cghidEventTap)
 }
 
-// MARK: - Event Tap Manager (Mirroring CopyShelf's .cgSessionEventTap approach)
+// MARK: - Event Tap Manager
 class EventTapManager {
     static let shared = EventTapManager()
 
@@ -114,7 +148,6 @@ class EventTapManager {
         let mask = (1 << CGEventType.otherMouseDown.rawValue) |
                    (1 << CGEventType.otherMouseUp.rawValue)
 
-        // Using .cgSessionEventTap at .headInsertEventTap exactly like CopyShelf
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
@@ -123,7 +156,7 @@ class EventTapManager {
             callback: eventCallback,
             userInfo: nil
         ) else {
-            NSLog("[mousebutton] Failed to create CGEventTap. Ensure Accessibility is enabled.")
+            NSLog("[mousebutton] Failed to create CGEventTap.")
             return
         }
 
@@ -134,7 +167,6 @@ class EventTapManager {
         self.tap = tap
         self.source = runLoopSource
         self.isListening = true
-        NSLog("[mousebutton] .cgSessionEventTap successfully installed and active.")
     }
 
     func removeTap() {
@@ -170,74 +202,83 @@ func eventCallback(
 
     let buttonNumber = event.getIntegerValueField(.mouseEventButtonNumber)
 
-    // RECORDING MODE: user clicked a button while app is listening
-    if ConfigManager.shared.isRecording {
+    // RECORDING MOUSE BUTTON
+    if ConfigManager.shared.isRecordingMouse {
         if type == .otherMouseDown {
             DispatchQueue.main.async {
                 ConfigManager.shared.onButtonRecorded?(buttonNumber)
             }
         }
-        return nil // swallow event
+        return nil
     }
 
     guard ConfigManager.shared.isEnabled else {
         return Unmanaged.passUnretained(event)
     }
 
-    // Check if this button is mapped
-    guard let action = ConfigManager.shared.mappings[buttonNumber] else {
-        // Pass through to other apps (e.g. CopyShelf or browser)
-        return Unmanaged.passUnretained(event)
+    // Check if this button is in active mappings
+    guard let mapping = ConfigManager.shared.mappings.first(where: { $0.buttonNumber == buttonNumber }) else {
+        return Unmanaged.passUnretained(event) // Pass through to other apps
     }
 
     if type == .otherMouseDown {
-        let currentFlags = event.flags
-        let shiftHeld = currentFlags.contains(.maskShift)
-
-        switch action {
-        case .nextWindow:
-            if shiftHeld {
-                sendKeystroke(virtualKey: kDefaultKeyCode, flags: [.maskCommand, .maskShift])
-            } else {
-                sendKeystroke(virtualKey: kDefaultKeyCode, flags: [.maskCommand])
-            }
-        case .prevWindow:
-            sendKeystroke(virtualKey: kDefaultKeyCode, flags: [.maskCommand, .maskShift])
-        }
+        sendKeystroke(
+            virtualKey: CGKeyCode(mapping.keyCode),
+            flags: CGEventFlags(rawValue: mapping.modifierFlags)
+        )
     }
 
-    // Swallow mouse down and mouse up for mapped buttons
-    return nil
+    return nil // Swallow event
 }
 
 // MARK: - Settings / Mapping Window Controller
 class SettingsWindowController: NSWindowController, NSWindowDelegate {
     static var shared: SettingsWindowController?
 
-    var recordButton: NSButton!
-    var cancelButton: NSButton!
-    var statusLabel: NSTextField!
+    // Global warning
     var permissionWarningLabel: NSTextField!
     var openSettingsButton: NSButton!
     var restartButton: NSButton!
-    var actionPopup: NSPopUpButton!
-    var saveButton: NSButton!
-    var recordedButtonNumber: Int64?
 
+    // New/Edit Entry Form Card
+    var formCardBox: NSBox!
+    var formTitleLabel: NSTextField!
+    var recordMouseBtn: NSButton!
+    var cancelMouseBtn: NSButton!
+    var mouseStatusLabel: NSTextField!
+
+    var recordShortcutBtn: NSButton!
+    var cancelShortcutBtn: NSButton!
+    var shortcutStatusLabel: NSTextField!
+
+    var saveEntryBtn: NSButton!
+    var cancelEntryBtn: NSButton!
+
+    var addNewButton: NSButton!
+    var mappingsStackView: NSStackView!
+
+    // Temporary working state for the form
+    var editingMappingID: String?
+    var draftButtonNumber: Int64?
+    var draftKeyCode: UInt16?
+    var draftModifierFlags: UInt64?
+    var draftShortcutDisplay: String?
+
+    // Listener monitors
+    var isRecordingShortcut: Bool = false
     var localKeyMonitor: Any?
     var globalKeyMonitor: Any?
     var localMouseMonitor: Any?
     var globalMouseMonitor: Any?
-    var mappingsStackView: NSStackView!
 
     convenience init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 420),
+            contentRect: NSRect(x: 0, y: 0, width: 540, height: 500),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
         )
-        window.title = "mousebutton Mappings"
+        window.title = "mousebutton Settings"
         window.center()
         window.isReleasedWhenClosed = false
         self.init(window: window)
@@ -254,26 +295,26 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let mainStack = NSStackView()
         mainStack.orientation = .vertical
         mainStack.alignment = .centerX
-        mainStack.spacing = 12
+        mainStack.spacing = 14
         mainStack.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(mainStack)
 
         NSLayoutConstraint.activate([
-            mainStack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 22),
+            mainStack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 20),
             mainStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
             mainStack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
-            mainStack.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -22)
+            mainStack.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -20)
         ])
 
-        // 1. Header (Centered)
-        let header = NSTextField(labelWithString: "Configure Mouse Button")
+        // 1. Title & Subtitle (Centered)
+        let header = NSTextField(labelWithString: "Configure Mouse Shortcuts")
         header.font = NSFont.boldSystemFont(ofSize: 15)
         header.alignment = .center
         mainStack.addArrangedSubview(header)
         header.leadingAnchor.constraint(equalTo: mainStack.leadingAnchor).isActive = true
         header.trailingAnchor.constraint(equalTo: mainStack.trailingAnchor).isActive = true
 
-        let desc = NSTextField(labelWithString: "Click Record below, then press your mouse button to bind it.")
+        let desc = NSTextField(labelWithString: "Map any mouse button to any keyboard shortcut combination.")
         desc.textColor = .secondaryLabelColor
         desc.font = NSFont.systemFont(ofSize: 12)
         desc.alignment = .center
@@ -281,7 +322,7 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
         desc.leadingAnchor.constraint(equalTo: mainStack.leadingAnchor).isActive = true
         desc.trailingAnchor.constraint(equalTo: mainStack.trailingAnchor).isActive = true
 
-        // Permission warning row (hidden when trusted, Centered)
+        // Permission warning row (hidden when trusted)
         let permRow = NSStackView()
         permRow.orientation = .horizontal
         permRow.spacing = 8
@@ -302,54 +343,16 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
         mainStack.addArrangedSubview(permRow)
 
-        // 2. Recording row (Centered)
-        let recordRow = NSStackView()
-        recordRow.orientation = .horizontal
-        recordRow.spacing = 10
-        recordRow.alignment = .centerY
+        // 2. Add New Mapping Button
+        addNewButton = NSButton(title: "＋ New Mapping", target: self, action: #selector(startNewMapping))
+        addNewButton.bezelStyle = .rounded
+        mainStack.addArrangedSubview(addNewButton)
 
-        recordButton = NSButton(title: "🎙️ Record Mouse Button", target: self, action: #selector(startRecording))
-        recordButton.bezelStyle = .rounded
-        recordRow.addArrangedSubview(recordButton)
-
-        cancelButton = NSButton(title: "Cancel (Esc)", target: self, action: #selector(cancelRecording))
-        cancelButton.bezelStyle = .rounded
-        cancelButton.keyEquivalent = "\u{1b}" // Esc key
-        cancelButton.isHidden = true
-        recordRow.addArrangedSubview(cancelButton)
-
-        mainStack.addArrangedSubview(recordRow)
-
-        // Status Label (Centered underneath Record button)
-        statusLabel = NSTextField(labelWithString: "Ready")
-        statusLabel.font = NSFont.systemFont(ofSize: 12)
-        statusLabel.textColor = .secondaryLabelColor
-        statusLabel.alignment = .center
-        mainStack.addArrangedSubview(statusLabel)
-        statusLabel.leadingAnchor.constraint(equalTo: mainStack.leadingAnchor).isActive = true
-        statusLabel.trailingAnchor.constraint(equalTo: mainStack.trailingAnchor).isActive = true
-
-        // 3. Action selection row (Centered)
-        let actionRow = NSStackView()
-        actionRow.orientation = .horizontal
-        actionRow.spacing = 10
-        actionRow.alignment = .centerY
-
-        let mapToLabel = NSTextField(labelWithString: "Map to:")
-        mapToLabel.font = NSFont.systemFont(ofSize: 12)
-        actionRow.addArrangedSubview(mapToLabel)
-
-        actionPopup = NSPopUpButton()
-        actionPopup.addItems(withTitles: ActionType.allCases.map { $0.description })
-        actionPopup.isEnabled = false
-        actionRow.addArrangedSubview(actionPopup)
-
-        saveButton = NSButton(title: "Save Mapping", target: self, action: #selector(saveMapping))
-        saveButton.bezelStyle = .rounded
-        saveButton.isEnabled = false
-        actionRow.addArrangedSubview(saveButton)
-
-        mainStack.addArrangedSubview(actionRow)
+        // 3. Editor Card Form (Hidden until New or Edit is pressed)
+        setupFormCard()
+        mainStack.addArrangedSubview(formCardBox)
+        formCardBox.leadingAnchor.constraint(equalTo: mainStack.leadingAnchor).isActive = true
+        formCardBox.trailingAnchor.constraint(equalTo: mainStack.trailingAnchor).isActive = true
 
         // Separator
         let separator = NSBox()
@@ -359,23 +362,478 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
         separator.leadingAnchor.constraint(equalTo: mainStack.leadingAnchor).isActive = true
         separator.trailingAnchor.constraint(equalTo: mainStack.trailingAnchor).isActive = true
 
-        // 4. Current Mappings Header (Centered)
-        let currentHeader = NSTextField(labelWithString: "Active Mappings:")
+        // 4. Active Mappings Header
+        let currentHeader = NSTextField(labelWithString: "Active Mappings")
         currentHeader.font = NSFont.boldSystemFont(ofSize: 13)
         currentHeader.alignment = .center
         mainStack.addArrangedSubview(currentHeader)
         currentHeader.leadingAnchor.constraint(equalTo: mainStack.leadingAnchor).isActive = true
         currentHeader.trailingAnchor.constraint(equalTo: mainStack.trailingAnchor).isActive = true
 
-        // Mappings container
+        // Scroll view / Container for Mappings
         mappingsStackView = NSStackView()
         mappingsStackView.orientation = .vertical
         mappingsStackView.alignment = .centerX
         mappingsStackView.spacing = 8
         mappingsStackView.translatesAutoresizingMaskIntoConstraints = false
-        mainStack.addArrangedSubview(mappingsStackView)
-        mappingsStackView.leadingAnchor.constraint(equalTo: mainStack.leadingAnchor).isActive = true
-        mappingsStackView.trailingAnchor.constraint(equalTo: mainStack.trailingAnchor).isActive = true
+
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.documentView = mappingsStackView
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+
+        mainStack.addArrangedSubview(scrollView)
+        scrollView.leadingAnchor.constraint(equalTo: mainStack.leadingAnchor).isActive = true
+        scrollView.trailingAnchor.constraint(equalTo: mainStack.trailingAnchor).isActive = true
+        scrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 120).isActive = true
+
+        // Pin document view width
+        mappingsStackView.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor).isActive = true
+        mappingsStackView.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor).isActive = true
+    }
+
+    func setupFormCard() {
+        formCardBox = NSBox()
+        formCardBox.boxType = .custom
+        formCardBox.borderColor = .separatorColor
+        formCardBox.borderWidth = 1
+        formCardBox.cornerRadius = 8
+        formCardBox.fillColor = NSColor.controlBackgroundColor.withAlphaComponent(0.6)
+        formCardBox.translatesAutoresizingMaskIntoConstraints = false
+        formCardBox.isHidden = true // hidden initially
+
+        let formStack = NSStackView()
+        formStack.orientation = .vertical
+        formStack.alignment = .centerX
+        formStack.spacing = 10
+        formStack.edgeInsets = NSEdgeInsets(top: 12, left: 16, bottom: 12, right: 16)
+        formStack.translatesAutoresizingMaskIntoConstraints = false
+
+        formTitleLabel = NSTextField(labelWithString: "New Shortcut Entry")
+        formTitleLabel.font = NSFont.boldSystemFont(ofSize: 12)
+        formTitleLabel.alignment = .center
+        formStack.addArrangedSubview(formTitleLabel)
+
+        // Row 1: Mouse Button
+        let mouseRow = NSStackView()
+        mouseRow.orientation = .horizontal
+        mouseRow.spacing = 10
+        mouseRow.alignment = .centerY
+
+        recordMouseBtn = NSButton(title: "🎙️ Record Mouse Button", target: self, action: #selector(startRecordingMouseButton))
+        recordMouseBtn.bezelStyle = .rounded
+        mouseRow.addArrangedSubview(recordMouseBtn)
+
+        cancelMouseBtn = NSButton(title: "Cancel (Esc)", target: self, action: #selector(cancelRecordingMouseButton))
+        cancelMouseBtn.bezelStyle = .rounded
+        cancelMouseBtn.isHidden = true
+        mouseRow.addArrangedSubview(cancelMouseBtn)
+
+        mouseStatusLabel = NSTextField(labelWithString: "No button set")
+        mouseStatusLabel.font = NSFont.systemFont(ofSize: 12)
+        mouseStatusLabel.textColor = .secondaryLabelColor
+        mouseRow.addArrangedSubview(mouseStatusLabel)
+
+        formStack.addArrangedSubview(mouseRow)
+
+        // Row 2: Keystroke Shortcut
+        let shortcutRow = NSStackView()
+        shortcutRow.orientation = .horizontal
+        shortcutRow.spacing = 10
+        shortcutRow.alignment = .centerY
+
+        recordShortcutBtn = NSButton(title: "⌨️ Record Shortcut", target: self, action: #selector(startRecordingShortcut))
+        recordShortcutBtn.bezelStyle = .rounded
+        shortcutRow.addArrangedSubview(recordShortcutBtn)
+
+        cancelShortcutBtn = NSButton(title: "Cancel (Esc)", target: self, action: #selector(cancelShortcutRecording))
+        cancelShortcutBtn.bezelStyle = .rounded
+        cancelShortcutBtn.isHidden = true
+        shortcutRow.addArrangedSubview(cancelShortcutBtn)
+
+        shortcutStatusLabel = NSTextField(labelWithString: "No shortcut set")
+        shortcutStatusLabel.font = NSFont.systemFont(ofSize: 12)
+        shortcutStatusLabel.textColor = .secondaryLabelColor
+        shortcutRow.addArrangedSubview(shortcutStatusLabel)
+
+        formStack.addArrangedSubview(shortcutRow)
+
+        // Row 3: Action Buttons (Save & Cancel)
+        let actionsRow = NSStackView()
+        actionsRow.orientation = .horizontal
+        actionsRow.spacing = 12
+        actionsRow.alignment = .centerY
+
+        saveEntryBtn = NSButton(title: "Save Mapping", target: self, action: #selector(saveCurrentFormEntry))
+        saveEntryBtn.bezelStyle = .rounded
+        saveEntryBtn.isEnabled = false
+        actionsRow.addArrangedSubview(saveEntryBtn)
+
+        cancelEntryBtn = NSButton(title: "Close Editor", target: self, action: #selector(closeFormEditor))
+        cancelEntryBtn.bezelStyle = .rounded
+        actionsRow.addArrangedSubview(cancelEntryBtn)
+
+        formStack.addArrangedSubview(actionsRow)
+
+        formCardBox.contentView = formStack
+    }
+
+    // MARK: - Form Actions
+    @objc func startNewMapping() {
+        editingMappingID = nil
+        draftButtonNumber = nil
+        draftKeyCode = nil
+        draftModifierFlags = nil
+        draftShortcutDisplay = nil
+
+        formTitleLabel.stringValue = "New Shortcut Entry"
+        mouseStatusLabel.stringValue = "Click 'Record Mouse Button'"
+        mouseStatusLabel.textColor = .secondaryLabelColor
+        shortcutStatusLabel.stringValue = "Click 'Record Shortcut'"
+        shortcutStatusLabel.textColor = .secondaryLabelColor
+
+        saveEntryBtn.isEnabled = false
+        formCardBox.isHidden = false
+        addNewButton.isHidden = true
+    }
+
+    @objc func closeFormEditor() {
+        cancelRecordingMouseButton()
+        cancelShortcutRecording()
+        formCardBox.isHidden = true
+        addNewButton.isHidden = false
+    }
+
+    func openEditor(for mapping: ButtonMapping) {
+        editingMappingID = mapping.id
+        draftButtonNumber = mapping.buttonNumber
+        draftKeyCode = mapping.keyCode
+        draftModifierFlags = mapping.modifierFlags
+        draftShortcutDisplay = mapping.displayString
+
+        let name = (mapping.buttonNumber == 2) ? "Middle Button (2)" : "Button \(mapping.buttonNumber)"
+        formTitleLabel.stringValue = "Editing: \(name)  ➔  \(mapping.displayString)"
+        mouseStatusLabel.stringValue = "✅ \(name)"
+        mouseStatusLabel.textColor = .systemGreen
+        shortcutStatusLabel.stringValue = "✅ \(mapping.displayString)"
+        shortcutStatusLabel.textColor = .systemGreen
+
+        saveEntryBtn.isEnabled = true
+        formCardBox.isHidden = false
+        addNewButton.isHidden = true
+    }
+
+    func updateSaveButtonState() {
+        let hasButton = (draftButtonNumber != nil)
+        let hasShortcut = (draftKeyCode != nil && draftShortcutDisplay != nil)
+        saveEntryBtn.isEnabled = hasButton && hasShortcut
+    }
+
+    @objc func saveCurrentFormEntry() {
+        guard let btn = draftButtonNumber,
+              let code = draftKeyCode,
+              let flags = draftModifierFlags,
+              let display = draftShortcutDisplay else { return }
+
+        let mapping = ButtonMapping(
+            id: editingMappingID ?? UUID().uuidString,
+            buttonNumber: btn,
+            keyCode: code,
+            modifierFlags: flags,
+            displayString: display
+        )
+
+        ConfigManager.shared.addOrUpdateMapping(mapping)
+        closeFormEditor()
+    }
+
+    // MARK: - Mouse Button Recording
+    @objc func startRecordingMouseButton() {
+        cancelShortcutRecording()
+
+        let options = ["AXTrustedCheckOptionPrompt" as CFString: kCFBooleanTrue] as CFDictionary
+        if !AXIsProcessTrustedWithOptions(options) {
+            updatePermissionStatus()
+            return
+        }
+
+        EventTapManager.shared.updateTap()
+
+        ConfigManager.shared.isRecordingMouse = true
+        recordMouseBtn.title = "Listening..."
+        recordMouseBtn.isEnabled = false
+        cancelMouseBtn.isHidden = false
+        mouseStatusLabel.stringValue = "👉 Click mouse button (Esc cancels)..."
+        mouseStatusLabel.textColor = .systemBlue
+
+        setupKeyEscMonitorForMouse()
+        setupMouseMonitors()
+
+        ConfigManager.shared.onButtonRecorded = { [weak self] button in
+            guard let self = self else { return }
+            self.finishRecordingMouseButton(button: button)
+        }
+    }
+
+    func finishRecordingMouseButton(button: Int64) {
+        removeKeyMonitors()
+        removeMouseMonitors()
+        ConfigManager.shared.isRecordingMouse = false
+        ConfigManager.shared.onButtonRecorded = nil
+        self.draftButtonNumber = button
+
+        let name = (button == 2) ? "Middle Button (2)" : "Button \(button)"
+        self.recordMouseBtn.title = "🎙️ Record Mouse Button"
+        self.recordMouseBtn.isEnabled = true
+        self.cancelMouseBtn.isHidden = true
+        self.mouseStatusLabel.stringValue = "✅ \(name)"
+        self.mouseStatusLabel.textColor = .systemGreen
+
+        updateSaveButtonState()
+    }
+
+    @objc func cancelRecordingMouseButton() {
+        guard ConfigManager.shared.isRecordingMouse else { return }
+        removeKeyMonitors()
+        removeMouseMonitors()
+        ConfigManager.shared.isRecordingMouse = false
+        ConfigManager.shared.onButtonRecorded = nil
+        recordMouseBtn.title = "🎙️ Record Mouse Button"
+        recordMouseBtn.isEnabled = true
+        cancelMouseBtn.isHidden = true
+        if let btn = draftButtonNumber {
+            let name = (btn == 2) ? "Middle Button (2)" : "Button \(btn)"
+            mouseStatusLabel.stringValue = "✅ \(name)"
+            mouseStatusLabel.textColor = .systemGreen
+        } else {
+            mouseStatusLabel.stringValue = "No button set"
+            mouseStatusLabel.textColor = .secondaryLabelColor
+        }
+    }
+
+    // MARK: - Keyboard Shortcut Recording
+    @objc func startRecordingShortcut() {
+        cancelRecordingMouseButton()
+
+        isRecordingShortcut = true
+        recordShortcutBtn.title = "Press keys..."
+        recordShortcutBtn.isEnabled = false
+        cancelShortcutBtn.isHidden = false
+        shortcutStatusLabel.stringValue = "👉 Press shortcut keys (e.g. ⌘ `)..."
+        shortcutStatusLabel.textColor = .systemBlue
+
+        setupShortcutKeyMonitor()
+    }
+
+    func setupShortcutKeyMonitor() {
+        removeKeyMonitors()
+
+        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+            guard let self = self, self.isRecordingShortcut else { return event }
+
+            let keyCode = event.keyCode
+            let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
+
+            // If user pressed Esc alone without modifiers, cancel recording
+            if keyCode == 53 && flags.isEmpty {
+                self.cancelShortcutRecording()
+                return nil
+            }
+
+            var cgFlags: CGEventFlags = []
+            var displayParts: [String] = []
+
+            if flags.contains(.control) {
+                cgFlags.insert(.maskControl)
+                displayParts.append("⌃")
+            }
+            if flags.contains(.option) {
+                cgFlags.insert(.maskAlternate)
+                displayParts.append("⌥")
+            }
+            if flags.contains(.shift) {
+                cgFlags.insert(.maskShift)
+                displayParts.append("⇧")
+            }
+            if flags.contains(.command) {
+                cgFlags.insert(.maskCommand)
+                displayParts.append("⌘")
+            }
+
+            let keyText = keyString(for: keyCode, characters: event.charactersIgnoringModifiers)
+            displayParts.append(keyText)
+
+            let fullDisplay = displayParts.joined(separator: " ")
+
+            self.finishShortcutRecording(keyCode: keyCode, modifierFlags: cgFlags.rawValue, displayString: fullDisplay)
+            return nil
+        }
+    }
+
+    func finishShortcutRecording(keyCode: UInt16, modifierFlags: UInt64, displayString: String) {
+        removeKeyMonitors()
+        isRecordingShortcut = false
+
+        self.draftKeyCode = keyCode
+        self.draftModifierFlags = modifierFlags
+        self.draftShortcutDisplay = displayString
+
+        self.recordShortcutBtn.title = "⌨️ Record Shortcut"
+        self.recordShortcutBtn.isEnabled = true
+        self.cancelShortcutBtn.isHidden = true
+        self.shortcutStatusLabel.stringValue = "✅ \(displayString)"
+        self.shortcutStatusLabel.textColor = .systemGreen
+
+        updateSaveButtonState()
+    }
+
+    @objc func cancelShortcutRecording() {
+        guard isRecordingShortcut else { return }
+        removeKeyMonitors()
+        isRecordingShortcut = false
+        recordShortcutBtn.title = "⌨️ Record Shortcut"
+        recordShortcutBtn.isEnabled = true
+        cancelShortcutBtn.isHidden = true
+
+        if let display = draftShortcutDisplay {
+            shortcutStatusLabel.stringValue = "✅ \(display)"
+            shortcutStatusLabel.textColor = .systemGreen
+        } else {
+            shortcutStatusLabel.stringValue = "No shortcut set"
+            shortcutStatusLabel.textColor = .secondaryLabelColor
+        }
+    }
+
+    // MARK: - Monitors
+    func setupKeyEscMonitorForMouse() {
+        removeKeyMonitors()
+        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+            if event.keyCode == 53 {
+                self?.cancelRecordingMouseButton()
+                return nil
+            }
+            return event
+        }
+    }
+
+    func setupMouseMonitors() {
+        removeMouseMonitors()
+        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.otherMouseDown]) { [weak self] event in
+            DispatchQueue.main.async {
+                guard ConfigManager.shared.isRecordingMouse else { return }
+                self?.finishRecordingMouseButton(button: Int64(event.buttonNumber))
+            }
+        }
+        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.otherMouseDown]) { [weak self] event in
+            DispatchQueue.main.async {
+                guard ConfigManager.shared.isRecordingMouse else { return }
+                self?.finishRecordingMouseButton(button: Int64(event.buttonNumber))
+            }
+            return nil
+        }
+    }
+
+    func removeKeyMonitors() {
+        if let monitor = localKeyMonitor {
+            NSEvent.removeMonitor(monitor)
+            localKeyMonitor = nil
+        }
+        if let monitor = globalKeyMonitor {
+            NSEvent.removeMonitor(monitor)
+            globalKeyMonitor = nil
+        }
+    }
+
+    func removeMouseMonitors() {
+        if let monitor = localMouseMonitor {
+            NSEvent.removeMonitor(monitor)
+            localMouseMonitor = nil
+        }
+        if let monitor = globalMouseMonitor {
+            NSEvent.removeMonitor(monitor)
+            globalMouseMonitor = nil
+        }
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        cancelRecordingMouseButton()
+        cancelShortcutRecording()
+    }
+
+    // MARK: - Mappings List View
+    func reloadMappingsList() {
+        guard mappingsStackView != nil else { return }
+
+        mappingsStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
+
+        if ConfigManager.shared.mappings.isEmpty {
+            let emptyLabel = NSTextField(labelWithString: "No mappings configured yet. Click '＋ New Mapping' above.")
+            emptyLabel.textColor = .secondaryLabelColor
+            emptyLabel.font = NSFont.systemFont(ofSize: 12)
+            emptyLabel.alignment = .center
+            mappingsStackView.addArrangedSubview(emptyLabel)
+            emptyLabel.leadingAnchor.constraint(equalTo: mappingsStackView.leadingAnchor).isActive = true
+            emptyLabel.trailingAnchor.constraint(equalTo: mappingsStackView.trailingAnchor).isActive = true
+            return
+        }
+
+        for mapping in ConfigManager.shared.mappings.sorted(by: { $0.buttonNumber < $1.buttonNumber }) {
+            let cardBox = NSBox()
+            cardBox.boxType = .custom
+            cardBox.borderColor = .separatorColor
+            cardBox.borderWidth = 1
+            cardBox.cornerRadius = 6
+            cardBox.fillColor = NSColor.controlBackgroundColor.withAlphaComponent(0.4)
+            cardBox.translatesAutoresizingMaskIntoConstraints = false
+
+            let row = NSStackView()
+            row.orientation = .horizontal
+            row.spacing = 10
+            row.alignment = .centerY
+            row.edgeInsets = NSEdgeInsets(top: 8, left: 14, bottom: 8, right: 14)
+            row.translatesAutoresizingMaskIntoConstraints = false
+
+            let btnName = (mapping.buttonNumber == 2) ? "Middle Button (2)" : "Button \(mapping.buttonNumber)"
+            let label = NSTextField(labelWithString: "• \(btnName)  ➔  \(mapping.displayString)")
+            label.font = NSFont.boldSystemFont(ofSize: 12)
+            row.addArrangedSubview(label)
+
+            let spacer = NSView()
+            spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            row.addArrangedSubview(spacer)
+
+            // Redo Button option
+            let redoBtn = NSButton(title: "Edit / Redo", target: self, action: #selector(editMappingClicked(_:)))
+            redoBtn.bezelStyle = .inline
+            redoBtn.identifier = NSUserInterfaceItemIdentifier(mapping.id)
+            row.addArrangedSubview(redoBtn)
+
+            // Delete button
+            let deleteBtn = NSButton(title: "Remove", target: self, action: #selector(deleteMappingClicked(_:)))
+            deleteBtn.bezelStyle = .inline
+            deleteBtn.identifier = NSUserInterfaceItemIdentifier(mapping.id)
+            row.addArrangedSubview(deleteBtn)
+
+            cardBox.contentView = row
+            mappingsStackView.addArrangedSubview(cardBox)
+
+            cardBox.leadingAnchor.constraint(equalTo: mappingsStackView.leadingAnchor).isActive = true
+            cardBox.trailingAnchor.constraint(equalTo: mappingsStackView.trailingAnchor).isActive = true
+        }
+    }
+
+    @objc func editMappingClicked(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue,
+              let mapping = ConfigManager.shared.mappings.first(where: { $0.id == id }) else { return }
+        openEditor(for: mapping)
+    }
+
+    @objc func deleteMappingClicked(_ sender: NSButton) {
+        guard let id = sender.identifier?.rawValue else { return }
+        ConfigManager.shared.removeMapping(id: id)
     }
 
     func updatePermissionStatus() {
@@ -406,202 +864,6 @@ class SettingsWindowController: NSWindowController, NSWindowDelegate {
         NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
     }
 
-    @objc func startRecording() {
-        let options = ["AXTrustedCheckOptionPrompt" as CFString: kCFBooleanTrue] as CFDictionary
-        let isTrusted = AXIsProcessTrustedWithOptions(options)
-
-        updatePermissionStatus()
-
-        if !isTrusted {
-            statusLabel.stringValue = "Grant Accessibility in System Settings, then try again."
-            statusLabel.textColor = .systemRed
-            return
-        }
-
-        EventTapManager.shared.updateTap()
-
-        ConfigManager.shared.isRecording = true
-        recordButton.title = "Listening..."
-        recordButton.isEnabled = false
-        cancelButton.isHidden = false
-        statusLabel.stringValue = "👉 Click your mouse button now (or press Esc)..."
-        statusLabel.textColor = .systemBlue
-        saveButton.isEnabled = false
-        actionPopup.isEnabled = false
-
-        setupKeyMonitors()
-        setupMouseMonitors()
-
-        ConfigManager.shared.onButtonRecorded = { [weak self] button in
-            guard let self = self else { return }
-            self.finishRecording(button: button)
-        }
-    }
-
-    func finishRecording(button: Int64) {
-        guard ConfigManager.shared.isRecording else { return }
-        removeKeyMonitors()
-        removeMouseMonitors()
-        ConfigManager.shared.isRecording = false
-        ConfigManager.shared.onButtonRecorded = nil
-        self.recordedButtonNumber = button
-
-        self.recordButton.title = "🎙️ Record Mouse Button"
-        self.recordButton.isEnabled = true
-        self.cancelButton.isHidden = true
-        let name = (button == 2) ? "Middle Button (Button 2)" : "Button \(button)"
-        self.statusLabel.stringValue = "✅ Detected: \(name)"
-        self.statusLabel.textColor = .systemGreen
-        self.actionPopup.isEnabled = true
-        self.saveButton.isEnabled = true
-    }
-
-    @objc func cancelRecording() {
-        guard ConfigManager.shared.isRecording else { return }
-        removeKeyMonitors()
-        removeMouseMonitors()
-        ConfigManager.shared.isRecording = false
-        ConfigManager.shared.onButtonRecorded = nil
-        recordButton.title = "🎙️ Record Mouse Button"
-        recordButton.isEnabled = true
-        cancelButton.isHidden = true
-        statusLabel.stringValue = "Listening cancelled."
-        statusLabel.textColor = .secondaryLabelColor
-    }
-
-    func setupKeyMonitors() {
-        removeKeyMonitors()
-
-        // Local monitor (when window has focus)
-        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            if event.keyCode == 53 { // Escape
-                self?.cancelRecording()
-                return nil
-            }
-            return event
-        }
-
-        // Global monitor (in case clicked outside before pressing Escape)
-        globalKeyMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            if event.keyCode == 53 {
-                DispatchQueue.main.async {
-                    self?.cancelRecording()
-                }
-            }
-        }
-    }
-
-    func setupMouseMonitors() {
-        removeMouseMonitors()
-
-        // Dual capture: NSEvent monitor also listens as a backup alongside the CGEventTap
-        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.otherMouseDown]) { [weak self] event in
-            DispatchQueue.main.async {
-                guard ConfigManager.shared.isRecording else { return }
-                self?.finishRecording(button: Int64(event.buttonNumber))
-            }
-        }
-
-        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.otherMouseDown]) { [weak self] event in
-            DispatchQueue.main.async {
-                guard ConfigManager.shared.isRecording else { return }
-                self?.finishRecording(button: Int64(event.buttonNumber))
-            }
-            return nil
-        }
-    }
-
-    func removeKeyMonitors() {
-        if let monitor = localKeyMonitor {
-            NSEvent.removeMonitor(monitor)
-            localKeyMonitor = nil
-        }
-        if let monitor = globalKeyMonitor {
-            NSEvent.removeMonitor(monitor)
-            globalKeyMonitor = nil
-        }
-    }
-
-    func removeMouseMonitors() {
-        if let monitor = localMouseMonitor {
-            NSEvent.removeMonitor(monitor)
-            localMouseMonitor = nil
-        }
-        if let monitor = globalMouseMonitor {
-            NSEvent.removeMonitor(monitor)
-            globalMouseMonitor = nil
-        }
-    }
-
-    func windowWillClose(_ notification: Notification) {
-        cancelRecording()
-    }
-
-    @objc func saveMapping() {
-        guard let button = recordedButtonNumber else { return }
-        let selectedIndex = actionPopup.indexOfSelectedItem
-        let chosenAction = ActionType.allCases[selectedIndex]
-
-        ConfigManager.shared.setMapping(button: button, action: chosenAction)
-
-        statusLabel.stringValue = "Saved Button \(button)!"
-        statusLabel.textColor = .secondaryLabelColor
-        saveButton.isEnabled = false
-        actionPopup.isEnabled = false
-        recordedButtonNumber = nil
-
-        reloadMappingsList()
-    }
-
-    func reloadMappingsList() {
-        guard mappingsStackView != nil else { return }
-
-        mappingsStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
-
-        if ConfigManager.shared.mappings.isEmpty {
-            let emptyLabel = NSTextField(labelWithString: "No mappings configured yet.")
-            emptyLabel.textColor = .secondaryLabelColor
-            emptyLabel.font = NSFont.systemFont(ofSize: 12)
-            emptyLabel.alignment = .center
-            mappingsStackView.addArrangedSubview(emptyLabel)
-            emptyLabel.leadingAnchor.constraint(equalTo: mappingsStackView.leadingAnchor).isActive = true
-            emptyLabel.trailingAnchor.constraint(equalTo: mappingsStackView.trailingAnchor).isActive = true
-            return
-        }
-
-        for (button, action) in ConfigManager.shared.mappings.sorted(by: { $0.key < $1.key }) {
-            let row = NSStackView()
-            row.orientation = .horizontal
-            row.spacing = 10
-            row.alignment = .centerY
-            row.translatesAutoresizingMaskIntoConstraints = false
-
-            let name = (button == 2) ? "Middle Button (Button 2)" : "Button \(button)"
-            let label = NSTextField(labelWithString: "• \(name): \(action.description)")
-            label.font = NSFont.systemFont(ofSize: 12)
-            row.addArrangedSubview(label)
-
-            let spacer = NSView()
-            spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-            row.addArrangedSubview(spacer)
-
-            let deleteBtn = NSButton(title: "Remove", target: self, action: #selector(deleteMappingClicked(_:)))
-            deleteBtn.bezelStyle = .inline
-            deleteBtn.tag = Int(button)
-            row.addArrangedSubview(deleteBtn)
-
-            mappingsStackView.addArrangedSubview(row)
-            row.leadingAnchor.constraint(equalTo: mappingsStackView.leadingAnchor).isActive = true
-            row.trailingAnchor.constraint(equalTo: mappingsStackView.trailingAnchor).isActive = true
-        }
-    }
-
-    @objc func deleteMappingClicked(_ sender: NSButton) {
-        let button = Int64(sender.tag)
-        ConfigManager.shared.removeMapping(button: button)
-        reloadMappingsList()
-    }
-
     func showWindow() {
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -618,7 +880,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var launchAtLoginMenuItem: NSMenuItem!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Enforce single instance across the system
         let bundleID = Bundle.main.bundleIdentifier ?? "com.ethanclawsie.mousebutton"
         let instances = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
         if instances.count > 1 {
@@ -679,10 +940,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             item.isEnabled = false
             menu.addItem(item)
         } else {
-            for (button, action) in ConfigManager.shared.mappings.sorted(by: { $0.key < $1.key }) {
-                let name = (button == 2) ? "Middle" : "Button \(button)"
-                let shortcut = (action == .nextWindow) ? "⌘ `" : "⌘ ⇧ `"
-                let item = NSMenuItem(title: "\(name)  →  \(action == .nextWindow ? "Next Window" : "Prev Window") (\(shortcut))", action: nil, keyEquivalent: "")
+            for mapping in ConfigManager.shared.mappings.sorted(by: { $0.buttonNumber < $1.buttonNumber }) {
+                let name = (mapping.buttonNumber == 2) ? "Middle" : "Button \(mapping.buttonNumber)"
+                let item = NSMenuItem(title: "\(name)  →  \(mapping.displayString)", action: nil, keyEquivalent: "")
                 item.isEnabled = false
                 menu.addItem(item)
             }
@@ -690,7 +950,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(NSMenuItem.separator())
 
-        // Launch at login via modern SMAppService (matching CopyShelf)
+        // Launch at login via modern SMAppService
         launchAtLoginMenuItem = NSMenuItem(title: "Launch at Login", action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         launchAtLoginMenuItem.target = self
         launchAtLoginMenuItem.state = isLaunchAtLoginEnabled() ? .on : .off
@@ -719,10 +979,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let button = statusItem.button {
             button.appearsDisabled = !ConfigManager.shared.isEnabled
         }
-    }
-
-    @objc func openAccessibilitySettings() {
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
     }
 
     func isLaunchAtLoginEnabled() -> Bool {
