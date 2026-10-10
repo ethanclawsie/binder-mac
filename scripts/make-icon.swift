@@ -42,7 +42,7 @@ func render(_ px: Int) -> Data {
     return rep.representation(using: .png, properties: [:])!
 }
 
-for base in [16, 32, 128, 256, 512] {
+for base in [16, 32, 128, 256] {
     try render(base).write(to: iconset.appendingPathComponent("icon_\(base)x\(base).png"))
     try render(base * 2).write(to: iconset.appendingPathComponent("icon_\(base)x\(base)@2x.png"))
 }

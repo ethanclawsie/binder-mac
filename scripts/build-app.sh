@@ -8,7 +8,7 @@ BUILD="${BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
 APP="dist/mousebutton.app"
 
 echo "▸ Building mousebutton $VERSION ($BUILD)"
-swift build -c release --arch arm64 --product mousebutton -Xswiftc -Osize -Xswiftc -gnone -Xlinker -dead_strip
+swift build -c release --arch arm64 --product mousebutton -Xswiftc -Osize -Xswiftc -wmo -Xswiftc -gnone -Xswiftc -enforce-exclusivity=unchecked -Xlinker -dead_strip
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
