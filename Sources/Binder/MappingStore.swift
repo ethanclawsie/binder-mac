@@ -1,8 +1,10 @@
 import Foundation
 import Observation
 
-private let kMappingsKey = "savedCustomButtonMappings_v2"
-private let kEnabledKey = "mousebutton_isEnabled"
+private let kMappingsKey = "binder_mappings"
+private let kLegacyMappingsKey = "savedCustomButtonMappings_v2"
+private let kEnabledKey = "binder_isEnabled"
+private let kLegacyEnabledKey = "mousebutton_isEnabled"
 
 @MainActor
 @Observable
@@ -52,6 +54,8 @@ public final class MappingStore {
     public init() {
         if UserDefaults.standard.object(forKey: kEnabledKey) != nil {
             self.isEnabled = UserDefaults.standard.bool(forKey: kEnabledKey)
+        } else if UserDefaults.standard.object(forKey: kLegacyEnabledKey) != nil {
+            self.isEnabled = UserDefaults.standard.bool(forKey: kLegacyEnabledKey)
         } else {
             self.isEnabled = true
         }
@@ -62,7 +66,8 @@ public final class MappingStore {
     }
 
     private func loadMappings() {
-        if let data = UserDefaults.standard.data(forKey: kMappingsKey),
+        let data = UserDefaults.standard.data(forKey: kMappingsKey) ?? UserDefaults.standard.data(forKey: kLegacyMappingsKey)
+        if let data,
            let loaded = try? JSONDecoder().decode([ShortcutMapping].self, from: data) {
             self.mappings = loaded.filter { mapping in
                 if mapping.triggerType == .key {

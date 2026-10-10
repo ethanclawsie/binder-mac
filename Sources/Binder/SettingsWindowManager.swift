@@ -22,7 +22,7 @@ final class SettingsWindowManager: NSObject, NSWindowDelegate {
                 backing: .buffered,
                 defer: false
             )
-            win.title = "mousebutton Settings"
+            win.title = "Binder Settings"
             win.center()
             win.isReleasedWhenClosed = false
             win.delegate = self

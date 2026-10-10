@@ -1,7 +1,7 @@
-APP_NAME = mousebutton.app
+APP_NAME = Binder.app
 DIST_APP = dist/$(APP_NAME)
 INSTALL_DIR = /Applications
-BUNDLE_ID = com.ethanclawsie.mousebutton
+BUNDLE_ID = com.ethanclawsie.Binder
 
 .PHONY: all build app run clean install uninstall
 
@@ -24,6 +24,7 @@ clean:
 
 install: app
 	@echo "==> Installing to $(INSTALL_DIR)..."
+	@pkill -f "/Applications/Binder.app" 2>/dev/null || true
 	@pkill -f "/Applications/mousebutton.app" 2>/dev/null || true
 	@sleep 0.5
 	@rm -rf $(INSTALL_DIR)/$(APP_NAME)
@@ -35,6 +36,6 @@ install: app
 	@echo "==> Successfully installed and launched."
 
 uninstall:
-	@pkill -f "/Applications/mousebutton.app" 2>/dev/null || true
+	@pkill -f "/Applications/Binder.app" 2>/dev/null || true
 	@rm -rf $(INSTALL_DIR)/$(APP_NAME)
 	@echo "==> Successfully uninstalled."

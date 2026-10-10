@@ -2,11 +2,11 @@
 import PackageDescription
 
 let package = Package(
-    name: "mousebutton",
+    name: "Binder",
     platforms: [.macOS(.v14)],
     targets: [
         .executableTarget(
-            name: "mousebutton"
+            name: "Binder"
         )
     ]
 )

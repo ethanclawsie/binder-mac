@@ -34,7 +34,7 @@ struct SettingsView: View {
         VStack(spacing: 16) {
             // 1. Header (Centered)
             VStack(spacing: 4) {
-                Text("Configure Shortcuts")
+                Text("Configure Binder")
                     .font(.headline)
                     .fontWeight(.bold)
                 Text("Map any mouse button or key to any keyboard shortcut.")

@@ -1,6 +1,10 @@
 .DS_Store
 /mousebutton
 /mousebutton.app/
+/Binder
+/Binder.app/
 .build/
 dist/
 *.o
+Resources/AppIcon_preview.png
+
