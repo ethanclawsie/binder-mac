@@ -1,4 +1,6 @@
 .DS_Store
 mousebutton
 mousebutton.app/
+.build/
+dist/
 *.o
