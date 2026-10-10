@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct SettingsView: View {
     @Bindable var store = MappingStore.shared
@@ -7,6 +8,7 @@ struct SettingsView: View {
 
     @State private var isCreatingNew = false
     @State private var triggerMode: TriggerType = .mouse
+    @State private var warningMessage: String?
 
     // Trigger state
     @State private var draftTriggerButton: Int64?
@@ -18,6 +20,15 @@ struct SettingsView: View {
     @State private var draftTargetKeyCode: UInt16?
     @State private var draftTargetFlags: UInt64?
     @State private var draftTargetDisplay: String?
+
+    private var isIdenticalKeyMapping: Bool {
+        guard triggerMode == .key,
+              let tCode = draftTriggerKeyCode,
+              let aCode = draftTargetKeyCode else { return false }
+        let tFlags = draftTriggerFlags ?? 0
+        let aFlags = draftTargetFlags ?? 0
+        return keyLookupHash(keyCode: tCode, modifierFlags: tFlags) == keyLookupHash(keyCode: aCode, modifierFlags: aFlags)
+    }
 
     var body: some View {
         VStack(spacing: 16) {
@@ -51,6 +62,30 @@ struct SettingsView: View {
                 .padding(.vertical, 8)
                 .background(RoundedRectangle(cornerRadius: 8).fill(Color.red.opacity(0.12)))
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.red.opacity(0.3), lineWidth: 1))
+            }
+
+            // Warning alert if any
+            if let warning = warningMessage {
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                    Text(warning)
+                        .font(.caption)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Button {
+                        warningMessage = nil
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.orange.opacity(0.12)))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.orange.opacity(0.3), lineWidth: 1))
             }
 
             // 2. Add New Mapping Button or Form
@@ -238,12 +273,22 @@ struct SettingsView: View {
                 }
             }
 
+            // Warning if trigger matches target shortcut
+            if isIdenticalKeyMapping {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                    Text("Trigger and action cannot be the same shortcut.")
+                }
+                .font(.caption)
+                .foregroundStyle(.orange)
+            }
+
             // Action row (Save / Cancel)
             HStack(spacing: 14) {
                 Button("Save Mapping") {
                     let hasTrigger = (triggerMode == .mouse && draftTriggerButton != nil) ||
                                      (triggerMode == .key && draftTriggerKeyCode != nil)
-                    guard hasTrigger,
+                    guard hasTrigger, !isIdenticalKeyMapping,
                           let code = draftTargetKeyCode,
                           let flags = draftTargetFlags,
                           let disp = draftTargetDisplay else { return }
@@ -270,7 +315,8 @@ struct SettingsView: View {
                 .disabled(
                     (triggerMode == .mouse && draftTriggerButton == nil) ||
                     (triggerMode == .key && draftTriggerKeyCode == nil) ||
-                    draftTargetDisplay == nil
+                    draftTargetDisplay == nil ||
+                    isIdenticalKeyMapping
                 )
 
                 Button("Cancel") {
@@ -328,10 +374,19 @@ struct SettingsView: View {
                     recorder.cancel()
                 } else if isMouse {
                     recorder.startRecordingMouse(.redoTrigger(mappingID: mapping.id, isMouse: true)) { newButton in
+                        warningMessage = nil
                         store.updateMouseTrigger(id: mapping.id, newButton: newButton)
                     }
                 } else {
                     recorder.startRecordingShortcut(.redoTrigger(mappingID: mapping.id, isMouse: false)) { code, flags, display in
+                        let tHash = keyLookupHash(keyCode: code, modifierFlags: flags)
+                        let aHash = keyLookupHash(keyCode: mapping.targetKeyCode, modifierFlags: mapping.targetModifierFlags)
+                        if tHash == aHash {
+                            NSSound.beep()
+                            warningMessage = "Trigger and action cannot be the same shortcut."
+                            return
+                        }
+                        warningMessage = nil
                         store.updateKeyTrigger(id: mapping.id, keyCode: code, modifierFlags: flags, display: display)
                     }
                 }
@@ -354,6 +409,16 @@ struct SettingsView: View {
                     recorder.cancel()
                 } else {
                     recorder.startRecordingShortcut(.redoAction(mappingID: mapping.id)) { code, flags, display in
+                        if mapping.triggerType == .key {
+                            let tHash = keyLookupHash(keyCode: mapping.triggerKeyCode, modifierFlags: mapping.triggerModifierFlags)
+                            let aHash = keyLookupHash(keyCode: code, modifierFlags: flags)
+                            if tHash == aHash {
+                                NSSound.beep()
+                                warningMessage = "Trigger and action cannot be the same shortcut."
+                                return
+                            }
+                        }
+                        warningMessage = nil
                         store.updateTargetShortcut(id: mapping.id, keyCode: code, modifierFlags: flags, display: display)
                     }
                 }

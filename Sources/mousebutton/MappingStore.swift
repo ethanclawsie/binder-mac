@@ -64,7 +64,14 @@ public final class MappingStore {
     private func loadMappings() {
         if let data = UserDefaults.standard.data(forKey: kMappingsKey),
            let loaded = try? JSONDecoder().decode([ShortcutMapping].self, from: data) {
-            self.mappings = loaded
+            self.mappings = loaded.filter { mapping in
+                if mapping.triggerType == .key {
+                    let tHash = keyLookupHash(keyCode: mapping.triggerKeyCode, modifierFlags: mapping.triggerModifierFlags)
+                    let aHash = keyLookupHash(keyCode: mapping.targetKeyCode, modifierFlags: mapping.targetModifierFlags)
+                    return tHash != aHash
+                }
+                return true
+            }
             return
         }
 
@@ -87,7 +94,16 @@ public final class MappingStore {
         }
     }
 
-    public func addOrUpdate(_ mapping: ShortcutMapping) {
+    @discardableResult
+    public func addOrUpdate(_ mapping: ShortcutMapping) -> Bool {
+        if mapping.triggerType == .key {
+            let tHash = keyLookupHash(keyCode: mapping.triggerKeyCode, modifierFlags: mapping.triggerModifierFlags)
+            let aHash = keyLookupHash(keyCode: mapping.targetKeyCode, modifierFlags: mapping.targetModifierFlags)
+            if tHash == aHash {
+                return false
+            }
+        }
+
         if let index = mappings.firstIndex(where: { $0.id == mapping.id }) {
             mappings[index] = mapping
         } else if mapping.triggerType == .mouse,
@@ -99,6 +115,7 @@ public final class MappingStore {
         } else {
             mappings.append(mapping)
         }
+        return true
     }
 
     public func remove(id: String) {
@@ -115,24 +132,40 @@ public final class MappingStore {
         }
     }
 
-    public func updateKeyTrigger(id: String, keyCode: UInt16, modifierFlags: UInt64, display: String) {
+    @discardableResult
+    public func updateKeyTrigger(id: String, keyCode: UInt16, modifierFlags: UInt64, display: String) -> Bool {
         if let index = mappings.firstIndex(where: { $0.id == id }) {
+            let tHash = keyLookupHash(keyCode: keyCode, modifierFlags: modifierFlags)
+            let aHash = keyLookupHash(keyCode: mappings[index].targetKeyCode, modifierFlags: mappings[index].targetModifierFlags)
+            if tHash == aHash { return false }
+
             var updated = mappings[index]
             updated.triggerType = .key
             updated.triggerKeyCode = keyCode
             updated.triggerModifierFlags = modifierFlags
             updated.triggerDisplay = display
             mappings[index] = updated
+            return true
         }
+        return false
     }
 
-    public func updateTargetShortcut(id: String, keyCode: UInt16, modifierFlags: UInt64, display: String) {
+    @discardableResult
+    public func updateTargetShortcut(id: String, keyCode: UInt16, modifierFlags: UInt64, display: String) -> Bool {
         if let index = mappings.firstIndex(where: { $0.id == id }) {
+            if mappings[index].triggerType == .key {
+                let tHash = keyLookupHash(keyCode: mappings[index].triggerKeyCode, modifierFlags: mappings[index].triggerModifierFlags)
+                let aHash = keyLookupHash(keyCode: keyCode, modifierFlags: modifierFlags)
+                if tHash == aHash { return false }
+            }
+
             var updated = mappings[index]
             updated.targetKeyCode = keyCode
             updated.targetModifierFlags = modifierFlags
             updated.targetDisplay = display
             mappings[index] = updated
+            return true
         }
+        return false
     }
 }
