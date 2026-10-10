@@ -29,29 +29,34 @@ An ultra-minimal, high-performance macOS menu bar utility to map any mouse butto
 
 ---
 
-### Quick Start
+### Install
 
-#### 1. Build and Run
+#### Via Homebrew (Recommended)
 
 ```bash
-make run
+brew install --cask ethanclawsie/tap/binder
 ```
-*(Look in your menu bar at the top of your screen for the Binder icon!)*
+
+Update anytime with:
+
+```bash
+brew upgrade --cask binder
+```
+
+---
+
+### Manual Install / Build from Source
+
+#### 1. Quick Local Install to `/Applications`
+
+```bash
+make install
+```
 
 #### 2. First-Time Permission Setup
 
 Because macOS protects global mouse and keyboard events, grant Accessibility permission when prompted:
 * **System Settings > Privacy & Security > Accessibility** > enable **Binder**.
-
----
-
-### Install Permanently to `/Applications`
-
-To compile release, code-sign with designated requirement, copy to `/Applications` and launch:
-
-```bash
-make install
-```
 
 Then simply click the menu bar icon and check **Launch at Login**!
 
