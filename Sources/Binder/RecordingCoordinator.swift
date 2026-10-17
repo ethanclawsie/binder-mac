@@ -44,11 +44,47 @@ public final class RecordingCoordinator {
         cancel()
         self.target = newTarget
         EventTapManager.shared.cancelRecordingMouse()
-        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
+        var pendingModifierKeyCode: UInt16?
+        var nonSingleKeyOccurred = false
+
+        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
             guard let self = self else { return event }
 
             let keyCode = event.keyCode
             let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
+
+            if event.type == .flagsChanged {
+                guard let modFlag = modifierFlagForKeyCode(keyCode) else { return event }
+                let cgEventFlags = CGEventFlags(rawValue: UInt64(event.modifierFlags.rawValue))
+                let isPressed = cgEventFlags.contains(modFlag)
+
+                if isPressed {
+                    let otherFlags = cgEventFlags.rawValue & ~modFlag.rawValue
+                    let standardMask: UInt64 = (1 << 20) | (1 << 19) | (1 << 18) | (1 << 17)
+                    if (otherFlags & standardMask) == 0 && pendingModifierKeyCode == nil && !nonSingleKeyOccurred {
+                        pendingModifierKeyCode = keyCode
+                    } else {
+                        pendingModifierKeyCode = nil
+                        nonSingleKeyOccurred = true
+                    }
+                } else {
+                    if let pending = pendingModifierKeyCode, pending == keyCode, !nonSingleKeyOccurred {
+                        let display = keyString(for: keyCode, characters: nil)
+                        self.cancelKeyMonitor()
+                        self.target = .none
+                        onRecorded(keyCode, 0, display)
+                        return nil
+                    }
+                    pendingModifierKeyCode = nil
+                    if flags.isEmpty {
+                        nonSingleKeyOccurred = false
+                    }
+                }
+                return nil
+            }
+
+            pendingModifierKeyCode = nil
+            nonSingleKeyOccurred = true
 
             // Esc cancels recording
             if keyCode == 53 && flags.isEmpty {

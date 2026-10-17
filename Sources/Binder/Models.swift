@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 public enum TriggerType: String, Codable, Sendable {
     case mouse
@@ -106,8 +107,28 @@ public func mouseButtonDisplayName(for button: Int64) -> String {
     }
 }
 
+public func modifierFlagForKeyCode(_ keyCode: UInt16) -> CGEventFlags? {
+    switch keyCode {
+    case 0x36, 0x37: return .maskCommand
+    case 0x38, 0x3C: return .maskShift
+    case 0x3A, 0x3D: return .maskAlternate
+    case 0x3B, 0x3E: return .maskControl
+    case 0x3F: return .maskSecondaryFn
+    default: return nil
+    }
+}
+
 public func keyString(for keyCode: UInt16, characters: String?) -> String {
     switch keyCode {
+    case 0x37: return "Left ⌘"
+    case 0x36: return "Right ⌘"
+    case 0x38: return "Left ⇧"
+    case 0x3C: return "Right ⇧"
+    case 0x3A: return "Left ⌥"
+    case 0x3D: return "Right ⌥"
+    case 0x3B: return "Left ⌃"
+    case 0x3E: return "Right ⌃"
+    case 0x3F: return "Fn"
     case 0x32: return "`"
     case 0x30: return "Tab"
     case 0x24: return "Return"

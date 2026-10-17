@@ -67,7 +67,8 @@ public final class EventTapManager {
 
         if MappingStore.shared.hasKeyMappings {
             mask |= (1 << CGEventType.keyDown.rawValue) |
-                    (1 << CGEventType.keyUp.rawValue)
+                    (1 << CGEventType.keyUp.rawValue) |
+                    (1 << CGEventType.flagsChanged.rawValue)
         }
 
         activeTapManager = self
@@ -142,20 +143,39 @@ public final class EventTapManager {
                 return false
             }
 
-            if type == .otherMouseDown {
-                sendKeystroke(
-                    virtualKey: CGKeyCode(mapping.targetKeyCode),
-                    flags: CGEventFlags(rawValue: mapping.targetModifierFlags)
-                )
-            }
+            sendKeyEvent(
+                virtualKey: CGKeyCode(mapping.targetKeyCode),
+                flags: CGEventFlags(rawValue: mapping.targetModifierFlags),
+                keyDown: type == .otherMouseDown
+            )
 
             return true
         }
 
-        // 2. Keyboard Key events
-        if type == .keyDown || type == .keyUp {
-            guard MappingStore.shared.isEnabled else {
+        // 2. Keyboard Key & Modifier events
+        if type == .keyDown || type == .keyUp || type == .flagsChanged {
+            guard MappingStore.shared.isEnabled,
+                  RecordingCoordinator.shared.target == .none else {
                 return false
+            }
+
+            if type == .flagsChanged {
+                guard let modFlag = modifierFlagForKeyCode(keyCode) else {
+                    return false
+                }
+                let isDown = CGEventFlags(rawValue: flags).contains(modFlag)
+                let otherFlags = flags & ~modFlag.rawValue
+                let hash = keyLookupHash(keyCode: keyCode, modifierFlags: otherFlags)
+                guard let mapping = MappingStore.shared.keyLookup[hash] else {
+                    return false
+                }
+
+                sendKeyEvent(
+                    virtualKey: CGKeyCode(mapping.targetKeyCode),
+                    flags: CGEventFlags(rawValue: mapping.targetModifierFlags),
+                    keyDown: isDown
+                )
+                return true
             }
 
             let hash = keyLookupHash(keyCode: keyCode, modifierFlags: flags)
@@ -163,12 +183,11 @@ public final class EventTapManager {
                 return false
             }
 
-            if type == .keyDown {
-                sendKeystroke(
-                    virtualKey: CGKeyCode(mapping.targetKeyCode),
-                    flags: CGEventFlags(rawValue: mapping.targetModifierFlags)
-                )
-            }
+            sendKeyEvent(
+                virtualKey: CGKeyCode(mapping.targetKeyCode),
+                flags: CGEventFlags(rawValue: mapping.targetModifierFlags),
+                keyDown: type == .keyDown
+            )
 
             return true
         }

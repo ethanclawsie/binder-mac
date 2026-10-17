@@ -13,7 +13,6 @@ swift build -c release --arch arm64 --product Binder \
   -Xswiftc -wmo \
   -Xswiftc -gnone \
   -Xswiftc -enforce-exclusivity=unchecked \
-  -Xswiftc -Xfrontend -Xswiftc -disable-reflection-metadata \
   -Xlinker -dead_strip
 
 rm -rf "$APP"
