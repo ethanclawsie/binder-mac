@@ -10,10 +10,11 @@ func sendKeyEvent(virtualKey: CGKeyCode, flags: CGEventFlags, keyDown: Bool) {
     guard let event = CGEvent(keyboardEventSource: hidEventSource, virtualKey: virtualKey, keyDown: keyDown) else {
         return
     }
-    if modifierFlagForKeyCode(UInt16(virtualKey)) != nil {
-        if !flags.isEmpty {
-            event.flags.formUnion(flags)
-        }
+    if let ownModFlag = modifierFlagForKeyCode(UInt16(virtualKey)) {
+        let physicalMods = CGEventSource.flagsState(.hidSystemState)
+            .intersection([.maskShift, .maskControl, .maskAlternate, .maskCommand])
+            .subtracting(ownModFlag)
+        event.flags.formUnion(flags.union(physicalMods))
     } else {
         event.flags = flags
     }
