@@ -21,6 +21,13 @@ public struct ShortcutMapping: Identifiable, Codable, Equatable, Sendable {
     public var targetModifierFlags: UInt64
     public var targetDisplay: String
 
+    // App scope: nil = Global, otherwise only active while this app is frontmost
+    public var appBundleID: String?
+    public var appName: String?
+
+    // Pass-through: true means don't intercept this trigger in this app (native behavior)
+    public var isPassThrough: Bool
+
     public init(
         id: String = UUID().uuidString,
         triggerType: TriggerType = .mouse,
@@ -28,9 +35,12 @@ public struct ShortcutMapping: Identifiable, Codable, Equatable, Sendable {
         triggerKeyCode: UInt16 = 0,
         triggerModifierFlags: UInt64 = 0,
         triggerDisplay: String = "Button 4",
-        targetKeyCode: UInt16,
-        targetModifierFlags: UInt64,
-        targetDisplay: String
+        targetKeyCode: UInt16 = 0,
+        targetModifierFlags: UInt64 = 0,
+        targetDisplay: String = "Pass Through",
+        appBundleID: String? = nil,
+        appName: String? = nil,
+        isPassThrough: Bool = false
     ) {
         self.id = id
         self.triggerType = triggerType
@@ -41,11 +51,15 @@ public struct ShortcutMapping: Identifiable, Codable, Equatable, Sendable {
         self.targetKeyCode = targetKeyCode
         self.targetModifierFlags = targetModifierFlags
         self.targetDisplay = targetDisplay
+        self.appBundleID = appBundleID
+        self.appName = appName
+        self.isPassThrough = isPassThrough
     }
 
     enum CodingKeys: String, CodingKey {
         case id, triggerType, triggerButton, triggerKeyCode, triggerModifierFlags, triggerDisplay
         case targetKeyCode, targetModifierFlags, targetDisplay
+        case appBundleID, appName, isPassThrough
         // Legacy keys
         case buttonNumber, keyCode, modifierFlags, displayString
     }
@@ -53,6 +67,9 @@ public struct ShortcutMapping: Identifiable, Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.id = try container.decodeIfPresent(String.self, forKey: .id) ?? UUID().uuidString
+        self.appBundleID = try container.decodeIfPresent(String.self, forKey: .appBundleID)
+        self.appName = try container.decodeIfPresent(String.self, forKey: .appName)
+        self.isPassThrough = try container.decodeIfPresent(Bool.self, forKey: .isPassThrough) ?? false
 
         if let type = try container.decodeIfPresent(TriggerType.self, forKey: .triggerType) {
             self.triggerType = type
@@ -60,9 +77,9 @@ public struct ShortcutMapping: Identifiable, Codable, Equatable, Sendable {
             self.triggerKeyCode = try container.decodeIfPresent(UInt16.self, forKey: .triggerKeyCode) ?? 0
             self.triggerModifierFlags = try container.decodeIfPresent(UInt64.self, forKey: .triggerModifierFlags) ?? 0
             self.triggerDisplay = try container.decodeIfPresent(String.self, forKey: .triggerDisplay) ?? "Button 4"
-            self.targetKeyCode = try container.decode(UInt16.self, forKey: .targetKeyCode)
-            self.targetModifierFlags = try container.decode(UInt64.self, forKey: .targetModifierFlags)
-            self.targetDisplay = try container.decode(String.self, forKey: .targetDisplay)
+            self.targetKeyCode = try container.decodeIfPresent(UInt16.self, forKey: .targetKeyCode) ?? 0
+            self.targetModifierFlags = try container.decodeIfPresent(UInt64.self, forKey: .targetModifierFlags) ?? 0
+            self.targetDisplay = try container.decodeIfPresent(String.self, forKey: .targetDisplay) ?? "Pass Through"
         } else {
             // Legacy ButtonMapping format
             self.triggerType = .mouse
@@ -88,6 +105,11 @@ public struct ShortcutMapping: Identifiable, Codable, Equatable, Sendable {
         try container.encode(targetKeyCode, forKey: .targetKeyCode)
         try container.encode(targetModifierFlags, forKey: .targetModifierFlags)
         try container.encode(targetDisplay, forKey: .targetDisplay)
+        try container.encodeIfPresent(appBundleID, forKey: .appBundleID)
+        try container.encodeIfPresent(appName, forKey: .appName)
+        if isPassThrough {
+            try container.encode(true, forKey: .isPassThrough)
+        }
     }
 }
 

@@ -17,7 +17,7 @@ final class SettingsWindowManager: NSObject, NSWindowDelegate {
 
         if window == nil {
             let win = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 530, height: 490),
+                contentRect: NSRect(x: 0, y: 0, width: 530, height: 640),
                 styleMask: [.titled, .closable],
                 backing: .buffered,
                 defer: false

@@ -16,7 +16,13 @@ public final class EventTapManager {
     @ObservationIgnored private var recordingCallback: ((Int64) -> Void)?
     @ObservationIgnored private var recordedButtonForMouseUp: Int64?
 
+    // Mapping fired on press, keyed by trigger button / key code, so the release matches it.
+    @ObservationIgnored private var heldMouse: [Int64: ShortcutMapping] = [:]
+    @ObservationIgnored private var heldKeys: [UInt64: ShortcutMapping] = [:]
+
     public init() {
+        heldMouse.reserveCapacity(4)
+        heldKeys.reserveCapacity(4)
         checkPermission()
     }
 
@@ -135,64 +141,61 @@ public final class EventTapManager {
                 return true
             }
 
-            guard MappingStore.shared.isEnabled else {
-                return false
+            if type == .otherMouseUp {
+                guard let held = heldMouse.removeValue(forKey: buttonNumber) else { return false }
+                send(held, keyDown: false)
+                return true
             }
 
-            guard let mapping = MappingStore.shared.mouseLookup[buttonNumber] else {
+            guard MappingStore.shared.isEnabled,
+                  let mapping = MappingStore.shared.mapping(forButton: buttonNumber) else {
                 return false
             }
-
-            sendKeyEvent(
-                virtualKey: CGKeyCode(mapping.targetKeyCode),
-                flags: CGEventFlags(rawValue: mapping.targetModifierFlags),
-                keyDown: type == .otherMouseDown
-            )
-
+            if mapping.isPassThrough {
+                return false
+            }
+            heldMouse[buttonNumber] = mapping
+            send(mapping, keyDown: true)
             return true
         }
 
         // 2. Keyboard Key & Modifier events
-        if type == .keyDown || type == .keyUp || type == .flagsChanged {
-            guard MappingStore.shared.isEnabled,
-                  RecordingCoordinator.shared.target == .none else {
+        if type == .flagsChanged {
+            guard let modFlag = modifierFlagForKeyCode(keyCode) else {
                 return false
             }
-
-            if type == .flagsChanged {
-                guard let modFlag = modifierFlagForKeyCode(keyCode) else {
-                    return false
-                }
-                let isDown = CGEventFlags(rawValue: flags).contains(modFlag)
-                let otherFlags = flags & ~modFlag.rawValue
-                let hash = keyLookupHash(keyCode: keyCode, modifierFlags: otherFlags)
-                guard let mapping = MappingStore.shared.keyLookup[hash] else {
-                    return false
-                }
-
-                sendKeyEvent(
-                    virtualKey: CGKeyCode(mapping.targetKeyCode),
-                    flags: CGEventFlags(rawValue: mapping.targetModifierFlags),
-                    keyDown: isDown
-                )
-                return true
-            }
-
-            let hash = keyLookupHash(keyCode: keyCode, modifierFlags: flags)
-            guard let mapping = MappingStore.shared.keyLookup[hash] else {
-                return false
-            }
-
-            sendKeyEvent(
-                virtualKey: CGKeyCode(mapping.targetKeyCode),
-                flags: CGEventFlags(rawValue: mapping.targetModifierFlags),
-                keyDown: type == .keyDown
-            )
-
-            return true
+            let isDown = CGEventFlags(rawValue: flags).contains(modFlag)
+            return handleKey(keyCode, flags: flags & ~modFlag.rawValue, isDown: isDown)
+        }
+        if type == .keyDown || type == .keyUp {
+            return handleKey(keyCode, flags: flags, isDown: type == .keyDown)
         }
 
         return false
+    }
+
+    private func handleKey(_ keyCode: UInt16, flags: UInt64, isDown: Bool) -> Bool {
+        if !isDown {
+            guard let held = heldKeys.removeValue(forKey: UInt64(keyCode)) else { return false }
+            send(held, keyDown: false)
+            return true
+        }
+
+        guard MappingStore.shared.isEnabled,
+              RecordingCoordinator.shared.target == .none,
+              let mapping = MappingStore.shared.mapping(forKeyHash: keyLookupHash(keyCode: keyCode, modifierFlags: flags)) else {
+            return false
+        }
+        if mapping.isPassThrough {
+            return false
+        }
+        heldKeys[UInt64(keyCode)] = mapping
+        send(mapping, keyDown: true)
+        return true
+    }
+
+    private func send(_ mapping: ShortcutMapping, keyDown: Bool) {
+        sendKeyEvent(virtualKey: CGKeyCode(mapping.targetKeyCode), flags: CGEventFlags(rawValue: mapping.targetModifierFlags), keyDown: keyDown)
     }
 }
 

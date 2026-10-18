@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Bindable var store = MappingStore.shared
@@ -21,8 +22,15 @@ struct SettingsView: View {
     @State private var draftTargetFlags: UInt64?
     @State private var draftTargetDisplay: String?
 
+    // App scope (nil = Global)
+    @State private var draftAppID: String?
+    @State private var draftAppName: String?
+    @State private var selectedApp: String?
+    @State private var isDraftPassThrough = false
+
     private var isIdenticalKeyMapping: Bool {
-        guard triggerMode == .key,
+        guard !isDraftPassThrough,
+              triggerMode == .key,
               let tCode = draftTriggerKeyCode,
               let aCode = draftTargetKeyCode else { return false }
         let tFlags = draftTriggerFlags ?? 0
@@ -109,32 +117,34 @@ struct SettingsView: View {
 
             Divider()
 
-            // 3. Active Mappings Section
-            VStack(spacing: 8) {
-                Text("Active Mappings")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
+            // 3. Global Mappings + App Overrides
+            ScrollView {
+                VStack(spacing: 8) {
+                    Text("Global Mappings")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
 
-                if store.mappings.isEmpty {
-                    Text("No mappings configured yet. Click '＋ New Mapping' above.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.vertical, 24)
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: 8) {
-                            ForEach(store.mappings) { mapping in
-                                mappingRow(for: mapping)
-                            }
+                    let global = store.mappings.filter { $0.appBundleID == nil }
+                    if global.isEmpty {
+                        Text("No global mappings yet. Click '＋ New Mapping' above.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 24)
+                    } else {
+                        ForEach(global) { mapping in
+                            mappingRow(for: mapping)
                         }
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 4)
                     }
-                    .frame(minHeight: 140, maxHeight: 220)
-                }
-            }
 
-            Spacer(minLength: 0)
+                    let apps = store.overrideApps
+                    if !apps.isEmpty {
+                        appOverridesSection(apps)
+                    }
+                }
+                .padding(.horizontal, 4)
+                .padding(.vertical, 4)
+            }
+            .frame(maxHeight: .infinity)
 
             Divider()
 
@@ -157,7 +167,69 @@ struct SettingsView: View {
             .padding(.bottom, 12)
         }
         .padding(.horizontal, 24)
-        .frame(width: 530, height: 500)
+        .frame(width: 530, height: 640)
+    }
+
+    // MARK: - App Overrides Section
+    @ViewBuilder
+    private func appOverridesSection(_ apps: [ShortcutMapping]) -> some View {
+        let current = apps.first(where: { $0.appBundleID == selectedApp }) ?? apps[0]
+
+        Divider()
+            .padding(.vertical, 6)
+
+        HStack(spacing: 8) {
+            Text("App Overrides")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+
+            Menu(current.appName ?? current.appBundleID ?? "") {
+                ForEach(apps) { app in
+                    appItem(app.appName ?? app.appBundleID ?? "", url: appURL(app.appBundleID)) {
+                        selectedApp = app.appBundleID
+                    }
+                }
+            }
+            .fixedSize()
+        }
+
+        ForEach(store.mappings.filter { $0.appBundleID == current.appBundleID }) { mapping in
+            mappingRow(for: mapping)
+        }
+    }
+
+    // MARK: - App helpers
+    private var runningApps: [NSRunningApplication] {
+        let ownID = Bundle.main.bundleIdentifier
+        return NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != nil && $0.bundleIdentifier != ownID }
+            .sorted { ($0.localizedName ?? "") < ($1.localizedName ?? "") }
+    }
+
+    private func chooseApp() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        guard panel.runModal() == .OK,
+              let url = panel.url,
+              let id = Bundle(url: url)?.bundleIdentifier else { return }
+        draftAppID = id
+        draftAppName = url.deletingPathExtension().lastPathComponent
+    }
+
+    private func appURL(_ bundleID: String?) -> URL? {
+        bundleID.flatMap { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) }
+    }
+
+    /// Menu item with the app's 16pt icon.
+    private func appItem(_ name: String, url: URL?, action: @escaping () -> Void) -> some View {
+        let ws = NSWorkspace.shared
+        let img = url.map { ws.icon(forFile: $0.path) } ?? ws.icon(for: .application)
+        img.size = NSSize(width: 16, height: 16)
+        return Button(action: action) {
+            Label { Text(name) } icon: { Image(nsImage: img) }
+                .labelStyle(.titleAndIcon)
+        }
     }
 
     private func resetDrafts() {
@@ -168,6 +240,9 @@ struct SettingsView: View {
         draftTargetKeyCode = nil
         draftTargetFlags = nil
         draftTargetDisplay = nil
+        draftAppID = nil
+        draftAppName = nil
+        isDraftPassThrough = false
     }
 
     // MARK: - New Mapping Card Form
@@ -190,6 +265,43 @@ struct SettingsView: View {
                 draftTriggerKeyCode = nil
                 draftTriggerFlags = nil
                 draftTriggerDisplay = nil
+            }
+
+            // Scope: Global or a specific app
+            HStack(spacing: 8) {
+                Text("Applies to")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Menu(draftAppName ?? "All Apps (Global)") {
+                    Button("All Apps (Global)") {
+                        draftAppID = nil
+                        draftAppName = nil
+                        isDraftPassThrough = false
+                    }
+                    Divider()
+                    ForEach(runningApps, id: \.processIdentifier) { app in
+                        appItem(app.localizedName ?? app.bundleIdentifier ?? "", url: app.bundleURL) {
+                            draftAppID = app.bundleIdentifier
+                            draftAppName = app.localizedName ?? app.bundleIdentifier
+                        }
+                    }
+                    Divider()
+                    Button("Choose App…") {
+                        chooseApp()
+                    }
+                }
+                .fixedSize()
+            }
+
+            // Action Mode: Shortcut vs Pass-Through (for app overrides)
+            if draftAppID != nil {
+                Picker("Action", selection: $isDraftPassThrough) {
+                    Text("Shortcut").tag(false)
+                    Text("Pass Through (Native)").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 20)
             }
 
             // Trigger Row
@@ -243,44 +355,51 @@ struct SettingsView: View {
                 }
             }
 
-            // Target Shortcut Row
-            HStack(spacing: 12) {
-                Button {
-                    recorder.startRecordingShortcut(.newActionShortcut) { code, flags, display in
-                        draftTargetKeyCode = code
-                        draftTargetFlags = flags
-                        draftTargetDisplay = display
+            // Target Shortcut Row or Pass-Through Notice
+            if isDraftPassThrough {
+                Text("Trigger will pass through untouched to \(draftAppName ?? "this app").")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, 4)
+            } else {
+                HStack(spacing: 12) {
+                    Button {
+                        recorder.startRecordingShortcut(.newActionShortcut) { code, flags, display in
+                            draftTargetKeyCode = code
+                            draftTargetFlags = flags
+                            draftTargetDisplay = display
+                        }
+                    } label: {
+                        if recorder.target == .newActionShortcut {
+                            Label("Press action keys... (Esc)", systemImage: "arrowshape.turn.up.right.fill")
+                                .foregroundStyle(.blue)
+                        } else if let disp = draftTargetDisplay {
+                            Label(disp, systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                        } else {
+                            Label("Record Target Shortcut", systemImage: "arrowshape.turn.up.right.fill")
+                        }
                     }
-                } label: {
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
+
                     if recorder.target == .newActionShortcut {
-                        Label("Press action keys... (Esc)", systemImage: "arrowshape.turn.up.right.fill")
-                            .foregroundStyle(.blue)
-                    } else if let disp = draftTargetDisplay {
-                        Label(disp, systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                    } else {
-                        Label("Record Target Shortcut", systemImage: "arrowshape.turn.up.right.fill")
+                        Button("Cancel") {
+                            recorder.cancel()
+                        }
+                        .controlSize(.small)
                     }
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.regular)
 
-                if recorder.target == .newActionShortcut {
-                    Button("Cancel") {
-                        recorder.cancel()
+                // Warning if trigger matches target shortcut
+                if isIdenticalKeyMapping {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                        Text("Trigger and action cannot be the same shortcut.")
                     }
-                    .controlSize(.small)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
                 }
-            }
-
-            // Warning if trigger matches target shortcut
-            if isIdenticalKeyMapping {
-                HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                    Text("Trigger and action cannot be the same shortcut.")
-                }
-                .font(.caption)
-                .foregroundStyle(.orange)
             }
 
             // Action row (Save / Cancel)
@@ -288,10 +407,14 @@ struct SettingsView: View {
                 Button("Save Mapping") {
                     let hasTrigger = (triggerMode == .mouse && draftTriggerButton != nil) ||
                                      (triggerMode == .key && draftTriggerKeyCode != nil)
-                    guard hasTrigger, !isIdenticalKeyMapping,
-                          let code = draftTargetKeyCode,
-                          let flags = draftTargetFlags,
-                          let disp = draftTargetDisplay else { return }
+                    guard hasTrigger else { return }
+
+                    if !isDraftPassThrough {
+                        guard !isIdenticalKeyMapping,
+                              let _ = draftTargetKeyCode,
+                              let _ = draftTargetFlags,
+                              let _ = draftTargetDisplay else { return }
+                    }
 
                     let newMapping = ShortcutMapping(
                         triggerType: triggerMode,
@@ -299,11 +422,17 @@ struct SettingsView: View {
                         triggerKeyCode: draftTriggerKeyCode ?? 0,
                         triggerModifierFlags: draftTriggerFlags ?? 0,
                         triggerDisplay: draftTriggerDisplay ?? "Key",
-                        targetKeyCode: code,
-                        targetModifierFlags: flags,
-                        targetDisplay: disp
+                        targetKeyCode: isDraftPassThrough ? 0 : (draftTargetKeyCode ?? 0),
+                        targetModifierFlags: isDraftPassThrough ? 0 : (draftTargetFlags ?? 0),
+                        targetDisplay: isDraftPassThrough ? "Pass Through" : (draftTargetDisplay ?? ""),
+                        appBundleID: draftAppID,
+                        appName: draftAppName,
+                        isPassThrough: isDraftPassThrough
                     )
                     store.addOrUpdate(newMapping)
+                    if let app = draftAppID {
+                        selectedApp = app
+                    }
 
                     withAnimation(.easeInOut(duration: 0.2)) {
                         isCreatingNew = false
@@ -315,8 +444,7 @@ struct SettingsView: View {
                 .disabled(
                     (triggerMode == .mouse && draftTriggerButton == nil) ||
                     (triggerMode == .key && draftTriggerKeyCode == nil) ||
-                    draftTargetDisplay == nil ||
-                    isIdenticalKeyMapping
+                    (!isDraftPassThrough && (draftTargetDisplay == nil || isIdenticalKeyMapping))
                 )
 
                 Button("Cancel") {
@@ -355,14 +483,26 @@ struct SettingsView: View {
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(.secondary)
 
-                Text(mapping.targetDisplay)
-                    .font(.system(size: 13, weight: .bold, design: .monospaced))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(
-                        RoundedRectangle(cornerRadius: 5)
-                            .fill(Color.primary.opacity(0.08))
-                    )
+                if mapping.isPassThrough {
+                    Text("Pass Through")
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(Color.secondary.opacity(0.12))
+                        )
+                } else {
+                    Text(mapping.targetDisplay)
+                        .font(.system(size: 13, weight: .bold, design: .monospaced))
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(Color.primary.opacity(0.08))
+                        )
+                }
             }
 
             Spacer()
@@ -379,12 +519,14 @@ struct SettingsView: View {
                     }
                 } else {
                     recorder.startRecordingShortcut(.redoTrigger(mappingID: mapping.id, isMouse: false)) { code, flags, display in
-                        let tHash = keyLookupHash(keyCode: code, modifierFlags: flags)
-                        let aHash = keyLookupHash(keyCode: mapping.targetKeyCode, modifierFlags: mapping.targetModifierFlags)
-                        if tHash == aHash {
-                            NSSound.beep()
-                            warningMessage = "Trigger and action cannot be the same shortcut."
-                            return
+                        if !mapping.isPassThrough {
+                            let tHash = keyLookupHash(keyCode: code, modifierFlags: flags)
+                            let aHash = keyLookupHash(keyCode: mapping.targetKeyCode, modifierFlags: mapping.targetModifierFlags)
+                            if tHash == aHash {
+                                NSSound.beep()
+                                warningMessage = "Trigger and action cannot be the same shortcut."
+                                return
+                            }
                         }
                         warningMessage = nil
                         store.updateKeyTrigger(id: mapping.id, keyCode: code, modifierFlags: flags, display: display)
@@ -403,36 +545,38 @@ struct SettingsView: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
 
-            // Inline Redo Action
-            Button {
-                if recorder.target == .redoAction(mappingID: mapping.id) {
-                    recorder.cancel()
-                } else {
-                    recorder.startRecordingShortcut(.redoAction(mappingID: mapping.id)) { code, flags, display in
-                        if mapping.triggerType == .key {
-                            let tHash = keyLookupHash(keyCode: mapping.triggerKeyCode, modifierFlags: mapping.triggerModifierFlags)
-                            let aHash = keyLookupHash(keyCode: code, modifierFlags: flags)
-                            if tHash == aHash {
-                                NSSound.beep()
-                                warningMessage = "Trigger and action cannot be the same shortcut."
-                                return
+            // Inline Redo Action (only if not pass-through)
+            if !mapping.isPassThrough {
+                Button {
+                    if recorder.target == .redoAction(mappingID: mapping.id) {
+                        recorder.cancel()
+                    } else {
+                        recorder.startRecordingShortcut(.redoAction(mappingID: mapping.id)) { code, flags, display in
+                            if mapping.triggerType == .key {
+                                let tHash = keyLookupHash(keyCode: mapping.triggerKeyCode, modifierFlags: mapping.triggerModifierFlags)
+                                let aHash = keyLookupHash(keyCode: code, modifierFlags: flags)
+                                if tHash == aHash {
+                                    NSSound.beep()
+                                    warningMessage = "Trigger and action cannot be the same shortcut."
+                                    return
+                                }
                             }
+                            warningMessage = nil
+                            store.updateTargetShortcut(id: mapping.id, keyCode: code, modifierFlags: flags, display: display)
                         }
-                        warningMessage = nil
-                        store.updateTargetShortcut(id: mapping.id, keyCode: code, modifierFlags: flags, display: display)
+                    }
+                } label: {
+                    if recorder.target == .redoAction(mappingID: mapping.id) {
+                        Text("Press keys... [Esc]")
+                            .foregroundStyle(.blue)
+                            .fontWeight(.semibold)
+                    } else {
+                        Text("Redo Action")
                     }
                 }
-            } label: {
-                if recorder.target == .redoAction(mappingID: mapping.id) {
-                    Text("Press keys... [Esc]")
-                        .foregroundStyle(.blue)
-                        .fontWeight(.semibold)
-                } else {
-                    Text("Redo Action")
-                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
 
             // Remove button
             Button {

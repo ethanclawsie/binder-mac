@@ -34,7 +34,8 @@ struct BinderApp: App {
                 Text("No shortcuts mapped")
             } else {
                 ForEach(store.mappings) { mapping in
-                    Text("\(mapping.triggerDisplay)  →  \(mapping.targetDisplay)")
+                    let targetText = mapping.isPassThrough ? "Pass Through" : mapping.targetDisplay
+                    Text("\(mapping.triggerDisplay)  →  \(targetText)" + (mapping.appName.map { "  (\($0))" } ?? ""))
                 }
             }
 
